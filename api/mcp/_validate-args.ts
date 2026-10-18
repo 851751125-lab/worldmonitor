@@ -1,9 +1,10 @@
 import { RpcValidationError } from './billing-denial';
 import { JMESPATH_SCHEMA } from './jmespath';
 import { SUMMARY_SCHEMA } from './registry';
+import { z } from 'zod';
 import type { ToolDef } from './types';
 
-// Validation keywords used by the registry. Descriptions, defaults and format
+// Validation keywords used by the registry. Descriptions, defaults and non-UUID format
 // annotations do not change arguments or impose additional caller constraints.
 type Schema = {
   type?: string | string[];
@@ -18,6 +19,7 @@ type Schema = {
   minLength?: number;
   maxLength?: number;
   pattern?: string;
+  format?: string;
   minItems?: number;
   maxItems?: number;
   uniqueItems?: boolean;
@@ -25,6 +27,7 @@ type Schema = {
   oneOf?: Schema[];
 };
 type Violation = { field: string; description: string };
+const UUID_SCHEMA = z.string().uuid();
 
 function matchesType(type: string, value: unknown): boolean {
   switch (type) {
@@ -58,6 +61,7 @@ function violationsFor(schema: Schema, value: unknown, field = ''): Violation[] 
     if (schema.minLength !== undefined && length < schema.minLength) reject(`Must contain at least ${schema.minLength} characters.`);
     if (schema.maxLength !== undefined && length > schema.maxLength) reject(`Must contain at most ${schema.maxLength} characters.`);
     if (schema.pattern && !new RegExp(schema.pattern).test(value)) reject('Must match the declared pattern.');
+    if (schema.format === 'uuid' && !UUID_SCHEMA.safeParse(value).success) reject('Must be a valid UUID.');
   }
   if (Array.isArray(value)) {
     if (schema.minItems !== undefined && value.length < schema.minItems) reject(`Must contain at least ${schema.minItems} items.`);
@@ -100,5 +104,5 @@ export function validateToolArgs(tool: ToolDef, args: unknown): asserts args is 
     },
   } as Schema, args);
   if (violations.length) throw new RpcValidationError(tool.name, violations);
-  tool._validateArgs?.(args as Record<string, unknown>);
+  tool._validateArgs?.(Object.fromEntries(Object.entries(args as Record<string, unknown>).filter(([key]) => key !== 'panel_request')));
 }

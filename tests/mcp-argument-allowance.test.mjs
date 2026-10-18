@@ -122,6 +122,10 @@ for (const [name, args, field] of [
   ['get_intel_timeline', { country: 'Atlantis' }, 'country'],
   ['get_intel_timeline', {}, 'domain'],
   ['get_forecast_scorecard', { view: 'archive', before: 'bad' }, 'before'],
+  ['open_country_brief', { country_code: 'Atlantis' }, 'country_code'],
+  ['get_country_brief_section', { section: 'signalsRaw', arguments: { country_code: 'ZZ' } }, 'arguments'],
+  ['open_news_dashboard', { map_latitude: 1 }, 'view'],
+  ['get_alert_digest', { view: 'today', movers_days: 7 }, 'movers_days'],
 ]) {
   it(`${name} rejects invalid ${field} before reservation`, async () => {
     const { pipe, fetches } = setup();
@@ -164,6 +168,32 @@ it('invalid panel openings and refreshes do not allocate a paid panel', async ()
   assert.equal(fetches(), 0);
 });
 
+it('API country brief rejects malformed UUIDs before spending allowance', async () => {
+  const { pipe, fetches } = setup();
+  const body = await (await call(pipe, 'open_country_brief', { country_code: 'US', request_id: 'bad' }, meters[2][1], false)).json();
+  assert.equal(body.error?.code, -32602);
+  assert.equal(body.error.data.violations[0].field, 'request_id');
+  assert.equal(pipe.count, 2);
+  assert.deepEqual(pipe.ops, []);
+  assert.equal(fetches(), 0);
+});
+
+for (const [name, args] of [
+  ['open_country_brief', { country_code: 'Atlantis' }],
+  ['get_country_brief_section', { section: 'signalsRaw', arguments: { country_code: 'ZZ' } }],
+  ['open_news_dashboard', { map_latitude: 1 }],
+  ['get_alert_digest', { view: 'today', movers_days: 7 }],
+]) {
+  it(`API ${name} validates local refinements before spending allowance`, async () => {
+    const { pipe, fetches } = setup();
+    const body = await (await call(pipe, name, args, meters[2][1], false)).json();
+    assert.equal(body.error?.code, -32602);
+    assert.equal(pipe.count, 2);
+    assert.deepEqual(pipe.ops, []);
+    assert.equal(fetches(), 0);
+  });
+}
+
 it('repeated invalid calls leave a free account able to make a valid call', async () => {
   const { pipe } = setup();
   for (let i = 0; i < 6; i++) {
@@ -194,7 +224,7 @@ it('country hooks reject unresolved filters while retaining aliases and Eurostat
     const field = ['country', 'countries', 'country_code'].find(field => tool.inputSchema.properties[field]);
     if (!field) continue;
     const base = tool.name === 'get_macro_history' ? { dataset: 'world-cpi' } : {};
-    if (['get_food_stocks', 'search_intel_history', 'get_intel_timeline', 'get_similar_events'].includes(tool.name)) {
+    if (['get_food_stocks', 'search_intel_history', 'get_intel_timeline', 'get_similar_events', 'open_news_dashboard'].includes(tool.name)) {
       assert.throws(() => tool._validateArgs({ [field]: 'Atlantis' }), RpcValidationError, tool.name);
       assert.doesNotThrow(() => tool._validateArgs({ [field]: 'IQ' }), tool.name);
       assert.throws(() => tool._validateArgs({ [field]: 'IRQ' }), RpcValidationError, tool.name);

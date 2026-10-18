@@ -12,6 +12,23 @@ import { COUNTRY_VIEW_UI_URI } from '../ui/news-dashboard-app';
 
 const COUNTRY_SECTION_BUDGET_BYTES = 524288;
 
+function countryViewArguments(params: Record<string, unknown>) {
+  const parsed = countryViewSchema.safeParse(Object.fromEntries(Object.entries(params).filter(([key]) => key !== 'jmespath')));
+  const countryCode = parsed.success ? resolveCountryCode(parsed.data.country_code) : null;
+  if (!parsed.success || !countryCode) throw new RpcValidationError('open_country_brief', [{ field: 'country_code', description: 'Supply a recognized country and topic.' }]);
+  return { countryCode, topic: parsed.data.topic };
+}
+
+function countrySectionArguments(params: Record<string, unknown>) {
+  const parsed = countryReaderSchema.safeParse(Object.fromEntries(Object.entries(params).filter(([key]) => key !== 'jmespath')));
+  if (!parsed.success) throw new RpcValidationError('get_country_brief_section', [{ field: 'section', description: 'Unknown country section reader.' }]);
+  const { section } = parsed.data;
+  const reader = COUNTRY_READERS[section];
+  const args = reader.args.safeParse(parsed.data.arguments);
+  if (!args.success) throw new RpcValidationError('get_country_brief_section', [{ field: 'arguments', description: 'Invalid arguments for this country section.' }]);
+  return { parsed, section, reader, args };
+}
+
 // What each section reader returns and what its arguments mean. The zod
 // schemas in shared/country-brief-host.ts carry the constraints; the prose
 // here is what tools/list advertises on every nested `arguments` property, so
@@ -153,11 +170,9 @@ export const COUNTRY_VIEW_TOOLS: ToolDef[] = [{
     required: ['countryCode', 'topic'],
   },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  _validateArgs: countryViewArguments,
   _execute: async (params, _base, _context, execution) => {
-    const parsed = countryViewSchema.safeParse(Object.fromEntries(Object.entries(params).filter(([key]) => key !== 'jmespath')));
-    const countryCode = parsed.success ? resolveCountryCode(parsed.data.country_code) : null;
-    if (!parsed.success || !countryCode) throw new RpcValidationError('open_country_brief', [{ field: 'country_code', description: 'Supply a recognized country and topic.' }]);
-    return { countryCode, topic: parsed.data.topic, ...(execution?.panelRequest ? { panelRequest: execution.panelRequest } : {}) };
+    return { ...countryViewArguments(params), ...(execution?.panelRequest ? { panelRequest: execution.panelRequest } : {}) };
   },
 }, {
   name: 'get_country_brief_section',
@@ -222,13 +237,9 @@ export const COUNTRY_VIEW_TOOLS: ToolDef[] = [{
     ],
   },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  _validateArgs: countrySectionArguments,
   _execute: async (params, base, context, execution) => {
-    const parsed = countryReaderSchema.safeParse(Object.fromEntries(Object.entries(params).filter(([key]) => key !== 'jmespath')));
-    if (!parsed.success) throw new RpcValidationError('get_country_brief_section', [{ field: 'section', description: 'Unknown country section reader.' }]);
-    const { section } = parsed.data;
-    const reader = COUNTRY_READERS[section];
-    const args = reader.args.safeParse(parsed.data.arguments);
-    if (!args.success) throw new RpcValidationError('get_country_brief_section', [{ field: 'arguments', description: 'Invalid arguments for this country section.' }]);
+    const { parsed, section, reader, args } = countrySectionArguments(params);
     if (section === 'signalsRaw') {
       const countryCode = (args.data as { country_code: string }).country_code;
       if (execution?.countryPanelCode !== countryCode) throw new RpcValidationError('get_country_brief_section', [{ field: 'panel_request', description: 'Raw Signals require a verified paid country panel read.' }]);

@@ -223,6 +223,13 @@ function focalPointCountry(params: Record<string, unknown>): string {
   return countryCode;
 }
 
+function alertDigestArguments(params: Record<string, unknown>) {
+  const view = typeof params.view === 'string' ? params.view : 'today';
+  const moversDays = ciiHistoryDays(params.movers_days, 'movers_days');
+  if (moversDays !== undefined && view !== 'weekly') throw new RpcValidationError('movers_days', [{ field: 'movers_days', description: 'Valid only with view: weekly.' }]);
+  return { view, moversDays };
+}
+
 export const ANALYSIS_TOOLS: ToolDef[] = [
   {
     name: 'get_signal_convergence',
@@ -869,10 +876,9 @@ export const ANALYSIS_TOOLS: ToolDef[] = [
       required: ['cached_at', 'stale', 'data'],
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    _validateArgs: alertDigestArguments,
     _execute: async (params) => {
-      const view = typeof params.view === 'string' ? params.view : 'today';
-      const moversDays = ciiHistoryDays(params.movers_days, 'movers_days');
-      if (moversDays !== undefined && view !== 'weekly') throw new RpcValidationError('movers_days', [{ field: 'movers_days', description: 'Valid only with view: weekly.' }]);
+      const { view, moversDays } = alertDigestArguments(params);
       const keys: string[] = [
         CII_RISK_SCORE_CACHE_KEYS.live,
         'military:surges:v1',
