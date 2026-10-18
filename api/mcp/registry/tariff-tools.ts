@@ -311,6 +311,7 @@ export const TARIFF_TOOLS: ToolDef[] = [
     _validateArgs: params => {
       tradeCountryCode(params.reporter, 'get-bilateral-tariff', 'reporter', { allowEu: true });
       tradeCountryCode(params.partner, 'get-bilateral-tariff', 'partner');
+      hsDigits(params.hs_code, 'get-bilateral-tariff', /^[0-9]{6}$/, '6 digits');
     },
     title: 'Product tariff between two countries',
     _outputBudgetBytes: 65536,
@@ -382,7 +383,10 @@ export const TARIFF_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_us_import_duty',
-    _validateArgs: params => { tradeCountryCode(params.partner, 'get-us-import-duty', 'partner'); },
+    _validateArgs: params => {
+      tradeCountryCode(params.partner, 'get-us-import-duty', 'partner');
+      hsDigits(params.hs_code, 'get-us-import-duty', /^[0-9]{6}([0-9]{2}){0,2}$/, '6, 8 or 10 digits');
+    },
     title: 'US import duty for a product',
     _outputBudgetBytes: 131072,
     description: 'Return the current US import duty for one product from one country: the live USITC Harmonized Tariff Schedule rates for each 8-digit line under hs_code, plus the chapter 99 Section 301 and 232 duties in force. Each additional duty has a status of APPLIES, CONDITIONAL (condition says what decides it), EXEMPT or SCHEDULED; estimatedRate adds only APPLIES duties to the base rate, and estimateComplete is false when a specific duty, a condition or an unresolved preference program leaves it open. IEEPA, anti-dumping and countervailing duties are not included; additionalDutiesLoaded=false means only base rates were available. Requires a paid plan; one live USITC lookup, weight 2 on API plans. hs_code is 6, 8 or 10 digits; partner is an alpha-2, alpha-3, M49 code or country name. Read-only.',

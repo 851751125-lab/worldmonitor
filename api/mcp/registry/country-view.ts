@@ -176,9 +176,13 @@ export const COUNTRY_VIEW_TOOLS: ToolDef[] = [{
       arguments: { type: 'object', additionalProperties: { type: ['string', 'number', 'boolean'] }, description: 'Arguments for the chosen section, as the matching oneOf branch defines them (key names differ per section and unknown keys are rejected). Omit for sections that take none.' },
     },
     required: ['section'],
-    oneOf: (Object.keys(COUNTRY_READERS) as CountryReader[]).map((section) => ({
-      properties: { section: { const: section, description: COUNTRY_SECTION_DOCS[section].summary }, arguments: describedSectionArguments(section) },
-    })),
+    oneOf: (Object.keys(COUNTRY_READERS) as CountryReader[]).map((section) => {
+      const args = describedSectionArguments(section);
+      return {
+        properties: { section: { const: section, description: COUNTRY_SECTION_DOCS[section].summary }, arguments: args },
+        ...((args.required as string[] | undefined)?.length ? { required: ['arguments'] } : {}),
+      };
+    }),
   },
   outputSchema: {
     type: 'object',

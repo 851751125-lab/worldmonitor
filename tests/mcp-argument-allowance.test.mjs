@@ -94,18 +94,27 @@ it('Pro rejects an unresolved required country before reservation or RPC fetch',
   assert.equal(fetches(), 0);
 });
 
-for (const [name, args] of [
-  ['get_macro_history', { dataset: 'world-cpi', country: 'Atlantis' }],
-  ['get_supply_chain_cost_shock', { mode: 'energy', country: 'Atlantis', chokepoint_id: 'hormuz' }],
-  ['compute_energy_shock', { country: 'Atlantis', chokepoint_id: 'hormuz' }],
-  ['get_internet_activity', { country: 'Atlantis' }],
-  ['get_tariff_averages', { reporter: 'Atlantis' }],
-  ['get_bilateral_tariff', { reporter: 'US', partner: 'Atlantis', hs_code: '270900' }],
-  ['get_us_import_duty', { partner: 'Atlantis', hs_code: '270900' }],
+for (const [name, args, field] of [
+  ['get_macro_history', { dataset: 'world-cpi', country: 'Atlantis' }, 'country'],
+  ['get_supply_chain_cost_shock', { mode: 'energy', country: 'Atlantis', chokepoint_id: 'hormuz_strait' }, 'country'],
+  ['compute_energy_shock', { country: 'Atlantis', chokepoint_id: 'hormuz_strait' }, 'country'],
+  ['get_internet_activity', { dataset: 'traffic', country: 'Atlantis' }, 'country'],
+  ['get_tariff_averages', { reporter: 'Atlantis' }, 'reporter'],
+  ['get_bilateral_tariff', { reporter: 'US', partner: 'Atlantis', hs_code: '270900' }, 'partner'],
+  ['get_us_import_duty', { partner: 'Atlantis', hs_code: '270900' }, 'partner'],
+  ['get_macro_history', { dataset: 'us-cpi', country: 'US' }, 'country'],
+  ['get_internet_activity', { dataset: 'ddos', country: 'US' }, 'country'],
+  ['get_country_brief_section', { section: 'food' }, 'arguments'],
+  ['get_supply_chain_cost_shock', { mode: 'energy', country: 'JP', chokepoint_id: 'suez', closure_days: 1 }, 'closure_days'],
+  ['get_supply_chain_cost_shock', { mode: 'multi-sector', country: 'JP', chokepoint_id: 'suez', hs2: '27' }, 'hs2'],
+  ['get_bilateral_tariff', { reporter: 'US', partner: 'CN', hs_code: 'bad' }, 'hs_code'],
+  ['get_us_import_duty', { partner: 'CN', hs_code: 'bad' }, 'hs_code'],
 ]) {
-  it(`${name} rejects an unresolved country before reservation`, async () => {
+  it(`${name} rejects invalid ${field} before reservation`, async () => {
     const { pipe, fetches } = setup();
-    assert.equal((await (await call(pipe, name, args, meters[1][1], false)).json()).error?.code, -32602);
+    const body = await (await call(pipe, name, args, meters[1][1], false)).json();
+    assert.equal(body.error?.code, -32602);
+    assert.equal(body.error.data.violations[0].field, field);
     assert.deepEqual(pipe.ops, []);
     assert.equal(pipe.count, 2);
     assert.equal(fetches(), 0);
@@ -152,10 +161,11 @@ it('country hooks reject unresolved filters while retaining aliases and Eurostat
   for (const tool of TOOL_REGISTRY.filter(tool => tool._validateArgs)) {
     const field = ['country', 'countries', 'country_code'].find(field => tool.inputSchema.properties[field]);
     if (!field) continue;
-    for (const value of ['Atlantis', { toString: 'x' }]) assert.throws(() => tool._validateArgs({ [field]: value }), RpcValidationError, tool.name);
+    const base = tool.name === 'get_macro_history' ? { dataset: 'world-cpi' } : {};
+    for (const value of ['Atlantis', { toString: 'x' }]) assert.throws(() => tool._validateArgs({ ...base, [field]: value }), RpcValidationError, tool.name);
     for (const value of ['IQ', 'IRQ', 'Iraq']) {
       if (tool.name === 'get_focal_points') continue;
-      assert.doesNotThrow(() => tool._validateArgs({ [field]: value }), tool.name);
+      assert.doesNotThrow(() => tool._validateArgs({ ...base, [field]: value }), tool.name);
     }
   }
   for (const name of ['get_eu_housing_cycle', 'get_eu_quarterly_gov_debt', 'get_eu_industrial_production']) {
