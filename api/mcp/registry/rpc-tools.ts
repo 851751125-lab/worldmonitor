@@ -3259,7 +3259,7 @@ export const RPC_TOOLS: ToolDef[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        country_code: { type: 'string', pattern: '^[A-Za-z]{2}$', description: 'ISO 3166-1 alpha-2 code of the importing country, such as AE, JP, or DE.' },
+        country_code: { type: 'string', description: `Importing country. ${COUNTRY_ARG_HINT}` },
       },
       required: ['country_code'],
     },

@@ -219,6 +219,13 @@ it('food stocks preserves omitted and empty commodities and downstream aliases',
   }
 });
 
+it('supply vulnerabilities retains country names and alpha-3 aliases through schema validation', () => {
+  const tool = TOOL_REGISTRY.find(tool => tool.name === 'get_supply_vulnerabilities');
+  for (const country_code of ['AE', 'ARE', 'United Arab Emirates']) {
+    assert.doesNotThrow(() => validateToolArgs(tool, { country_code }), country_code);
+  }
+});
+
 it('covers the validation vocabulary in every published tool input schema', () => {
   const supported = new Set('$schema type properties required items enum const minimum maximum exclusiveMinimum minLength maxLength pattern minItems maxItems uniqueItems additionalProperties oneOf description default format'.split(' '));
   function check(schema) {
