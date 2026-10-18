@@ -22,6 +22,9 @@ function setup() {
   installRedis({
     'economic:eu-gas-storage:v1': { history: [{ date: '2026-10-18', fillPct: 80 }] },
     'cyber:threats-bootstrap:v2': { threats: [{ country: 'IQ' }] },
+    'sanctions:entities:v1': [],
+    'sanctions:pressure:v1': {},
+    'sanctions:changes:v1': { fetchedAt: 1, events: [] },
   });
   const redisFetch = globalThis.fetch;
   let fetches = 0;
@@ -45,6 +48,9 @@ const call = (pipe, name, args, budget, freeAccount) => dispatchToolsCall(
 for (const [meter, budget, freeAccount] of meters) {
   for (const [name, args, field] of [
     ['get_tariff_trends', { dataset: ['tariffs'] }, 'dataset'],
+    ['get_price_and_debt_indicators', { dataset: ['tariffs'] }, 'dataset'],
+    ['get_tariff_trends', { country: 'Atlantis' }, 'country'],
+    ['get_price_and_debt_indicators', { country: 'Atlantis' }, 'country'],
     ['get_energy_storage', { dataset: ['unsupported'] }, 'dataset'],
     ['get_energy_storage', { limit: 1.5 }, 'limit'],
     ['get_energy_storage', { limit: -1 }, 'limit'],
@@ -109,6 +115,12 @@ for (const [name, args, field] of [
   ['get_supply_chain_cost_shock', { mode: 'multi-sector', country: 'JP', chokepoint_id: 'suez', hs2: '27' }, 'hs2'],
   ['get_bilateral_tariff', { reporter: 'US', partner: 'CN', hs_code: 'bad' }, 'hs_code'],
   ['get_us_import_duty', { partner: 'CN', hs_code: 'bad' }, 'hs_code'],
+  ['get_food_stocks', { country_code: 'Atlantis' }, 'country_code'],
+  ['search_intel_history', { query: 'shipping', country: 'Atlantis' }, 'country'],
+  ['get_similar_events', { situation: 'a naval blockade', country: 'Atlantis' }, 'country'],
+  ['get_intel_timeline', { country: 'Atlantis' }, 'country'],
+  ['get_intel_timeline', {}, 'domain'],
+  ['get_forecast_scorecard', { view: 'archive', before: 'bad' }, 'before'],
 ]) {
   it(`${name} rejects invalid ${field} before reservation`, async () => {
     const { pipe, fetches } = setup();
@@ -119,6 +131,25 @@ for (const [name, args, field] of [
     assert.equal(pipe.count, 2);
     assert.equal(fetches(), 0);
   });
+}
+
+for (const [meter, budget] of meters.slice(1)) {
+  for (const [args, field] of [
+    [{ screen: '  ' }, 'screen'],
+    [{ screen: 'Example', changes_since_days: 1 }, 'screen'],
+    [{ changes_cursor: '1:0' }, 'changes_cursor'],
+    [{ changes_since_days: 1, changes_cursor: 'bad' }, 'changes_cursor'],
+  ]) {
+    it(`${meter}: sanctions rejects ${JSON.stringify(args)} before spending allowance`, async () => {
+      const { pipe, fetches } = setup();
+      const body = await (await call(pipe, 'get_sanctions_data', args, budget, false)).json();
+      assert.equal(body.error?.code, -32602, JSON.stringify(body));
+      assert.equal(body.error.data.violations[0].field, field);
+      assert.equal(pipe.count, 2);
+      assert.deepEqual(pipe.ops, []);
+      assert.equal(fetches(), 0);
+    });
+  }
 }
 
 it('invalid panel openings and refreshes do not allocate a paid panel', async () => {
@@ -162,6 +193,12 @@ it('country hooks reject unresolved filters while retaining aliases and Eurostat
     const field = ['country', 'countries', 'country_code'].find(field => tool.inputSchema.properties[field]);
     if (!field) continue;
     const base = tool.name === 'get_macro_history' ? { dataset: 'world-cpi' } : {};
+    if (['get_food_stocks', 'search_intel_history', 'get_intel_timeline', 'get_similar_events'].includes(tool.name)) {
+      assert.throws(() => tool._validateArgs({ [field]: 'Atlantis' }), RpcValidationError, tool.name);
+      assert.doesNotThrow(() => tool._validateArgs({ [field]: 'IQ' }), tool.name);
+      assert.throws(() => tool._validateArgs({ [field]: 'IRQ' }), RpcValidationError, tool.name);
+      continue;
+    }
     for (const value of ['Atlantis', { toString: 'x' }]) assert.throws(() => tool._validateArgs({ ...base, [field]: value }), RpcValidationError, tool.name);
     for (const value of ['IQ', 'IRQ', 'Iraq']) {
       if (tool.name === 'get_focal_points') continue;

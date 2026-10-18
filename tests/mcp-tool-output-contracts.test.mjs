@@ -66,6 +66,7 @@ const REQUIRED_ARGS = {
   get_maritime_activity: { country_code: 'US' },
   analyze_situation: { query: 'test query' },
   search_intel_history: { query: 'test query' },
+  get_intel_timeline: { domain: 'conflict' },
   // `situation` carries a 10-char proto minimum, so the placeholder clears it.
   get_similar_events: { situation: 'a test situation description' },
   search_flights: { origin: 'JFK', destination: 'LHR', departure_date: '2026-06-01' },

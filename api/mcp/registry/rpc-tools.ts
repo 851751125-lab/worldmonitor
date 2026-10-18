@@ -630,6 +630,30 @@ function assertIntelHistoryCountry(label: string, country: string): void {
   }
 }
 
+function intelTimelineScope(params: Record<string, unknown>) {
+  const domain = typeof params.domain === 'string' ? params.domain.trim() : '';
+  const country = normalizeCountry(params.country);
+  assertIntelHistoryCountry('get-intel-timeline', country);
+  if (!domain && !country) {
+    throw new RpcValidationError('get-intel-timeline', [
+      { field: 'domain', description: 'Required unless country is set. One of conflict, military, or energy.' },
+      { field: 'country', description: 'Required unless domain is set. ISO 3166-1 alpha-2, uppercase (e.g. UA).' },
+    ]);
+  }
+  return { domain, country };
+}
+
+function foodStocksCountry(params: Record<string, unknown>): string {
+  const country = typeof params.country_code === 'string' ? params.country_code.trim().toUpperCase() : '';
+  if (!/^(?:[A-Z]{2}|WORLD|WLD|_WORLD)$/.test(country)) {
+    throw new RpcValidationError('get-food-stocks', [{
+      field: 'country_code',
+      description: 'country_code is required and must be a 2-letter ISO 3166-1 alpha-2 code or WORLD',
+    }]);
+  }
+  return country;
+}
+
 function procurementPageSize(value: unknown): number {
   return Number.isInteger(value) && (value as number) > 0
     ? Math.min(PROCUREMENT_TOOL_MAX_PAGE_SIZE, value as number)
@@ -2087,6 +2111,7 @@ export const RPC_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_food_stocks',
+    _validateArgs: params => { foodStocksCountry(params); },
     title: 'Cereal stocks-to-use ratios',
     _outputBudgetBytes: 131072,
     description: 'USDA PSD cereal stocks-to-use by marketing year. Ask for a country (ISO-2) plus optional commodity (wheat, corn, rice, soybeans, barley, palmOil), or country_code=WORLD for the global balance. Returns ending stocks, production, use, and the stocks-to-use ratio. Marketing years are not calendar years and must not be compared across countries as if they were.',
@@ -2155,13 +2180,7 @@ export const RPC_TOOLS: ToolDef[] = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     _coverageKeys: ['resilience:food-stocks:v1', 'seed-meta:resilience:food-stocks'],
     _execute: async (params, base, context, execution) => {
-      const countryCode = typeof params.country_code === 'string' ? params.country_code.trim().toUpperCase() : '';
-      if (!/^(?:[A-Z]{2}|WORLD|WLD|_WORLD)$/.test(countryCode)) {
-        throw new RpcValidationError('get-food-stocks', [{
-          field: 'country_code',
-          description: 'country_code is required and must be a 2-letter ISO 3166-1 alpha-2 code or WORLD',
-        }]);
-      }
+      const countryCode = foodStocksCountry(params);
       const q = new URLSearchParams({ countryCode });
       if (params.commodity) q.set('commodity', String(params.commodity).trim());
       const qs = q.toString();
@@ -3334,6 +3353,7 @@ export const RPC_TOOLS: ToolDef[] = [
   ...ANALYSIS_TOOLS,
   {
     name: 'search_intel_history',
+    _validateArgs: params => { assertIntelHistoryCountry('search-intel-history', normalizeCountry(params.country)); },
     title: 'Search past intelligence events',
     // 16 full records fit this tool's 128 KiB output ceiling with headroom.
     _outputBudgetBytes: 131072,
@@ -3386,6 +3406,7 @@ export const RPC_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_intel_timeline',
+    _validateArgs: params => { intelTimelineScope(params); },
     title: 'Intelligence event timeline',
     // 40 full records fit this tool's 256 KiB output ceiling with headroom.
     _outputBudgetBytes: 262144,
@@ -3417,21 +3438,7 @@ export const RPC_TOOLS: ToolDef[] = [
       // violations (RpcValidationError) and saves the round-trip; the handler
       // stays the enforcing authority. A plain Error would land as -32603 +
       // Sentry error (WORLDMONITOR-10Y).
-      const domain = typeof params.domain === 'string' ? params.domain.trim() : '';
-      const country = normalizeCountry(params.country);
-      assertIntelHistoryCountry('get-intel-timeline', country);
-      if (!domain && !country) {
-        throw new RpcValidationError('get-intel-timeline', [
-          {
-            field: 'domain',
-            description: 'Required unless country is set. One of conflict, military, or energy.',
-          },
-          {
-            field: 'country',
-            description: 'Required unless domain is set. ISO 3166-1 alpha-2, uppercase (e.g. UA).',
-          },
-        ]);
-      }
+      const { domain, country } = intelTimelineScope(params);
 
       const query = new URLSearchParams();
       addStringParam(query, 'domain', domain);
@@ -3461,6 +3468,7 @@ export const RPC_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_similar_events',
+    _validateArgs: params => { assertIntelHistoryCountry('get-similar-events', normalizeCountry(params.country)); },
     title: 'Historical precedents for a situation',
     // Eight full records fit this tool's 64 KiB output ceiling with headroom.
     _outputBudgetBytes: 65536,

@@ -93,6 +93,30 @@ function sanctionsChangesCursor(value: unknown): { fetchedAt?: number; offset: n
   return { fetchedAt: Number(match[1]), offset: Number(match[2]) };
 }
 
+function sanctionsArguments(params: Record<string, unknown>) {
+  if (params.screen !== undefined && (typeof params.screen !== 'string'
+    || params.screen.trim().length < 2 || params.screen.trim().length > 200)) {
+    throw new RpcValidationError('get_sanctions_data', [{ field: 'screen', description: 'Expected 2-200 characters.' }]);
+  }
+  if (params.min_score !== undefined && (typeof params.min_score !== 'number'
+    || !Number.isFinite(params.min_score) || params.min_score < 0 || params.min_score > 100)) {
+    throw new RpcValidationError('get_sanctions_data', [{ field: 'min_score', description: 'Expected a score from 0 to 100.' }]);
+  }
+  const countries = resolveCountryFilter(params.country, 'country');
+  const days = params.changes_since_days;
+  if (days !== undefined && params.screen !== undefined) {
+    throw new RpcValidationError('get_sanctions_data', [{ field: 'screen', description: 'Use screen without changes_since_days; history supports query.' }]);
+  }
+  const cursor = sanctionsChangesCursor(params.changes_cursor);
+  if (days === undefined && params.changes_cursor !== undefined) {
+    throw new RpcValidationError('get_sanctions_data', [{ field: 'changes_cursor', description: 'Requires changes_since_days.' }]);
+  }
+  if (days !== undefined && (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > 90)) {
+    throw new RpcValidationError('get_sanctions_data', [{ field: 'changes_since_days', description: 'Expected an integer from 1 to 90.' }]);
+  }
+  return { countries, days, cursor };
+}
+
 // Eurostat uses EL for Greece and also publishes these two non-country geos.
 function resolveEurostatCountryFilter(raw: unknown): string[] {
   if (raw == null || (typeof raw === 'string' && !raw.trim())) return [];
@@ -748,10 +772,7 @@ function projectForecastArchive(value: unknown, metaValue: unknown) {
     }) };
 }
 
-function filterForecastScorecard(data: Record<string, unknown>, params: Record<string, unknown>) {
-  const { forecastArchive, ...summary } = data;
-  if (params.view === undefined || params.view === 'summary') return summary;
-  if (params.view !== 'archive') throw new RpcValidationError('get_forecast_scorecard', [{ field: 'view', description: 'Expected summary or archive.' }]);
+function forecastArchiveArguments(params: Record<string, unknown>) {
   const limit = params.limit ?? 25;
   const continuation = typeof params.before === 'string' ? /^(\d+):(\d+)$/.exec(params.before) : null;
   const before = continuation ? Number(continuation[1]) : params.before;
@@ -762,6 +783,14 @@ function filterForecastScorecard(data: Record<string, unknown>, params: Record<s
     || params.outcome !== undefined && !['YES', 'NO', 'VOID'].includes(String(params.outcome))) {
     throw new RpcValidationError('get_forecast_scorecard', [{ field: 'before', description: 'Use a resolvedAt timestamp or nextBefore cursor, limit 1-50 and outcome YES, NO or VOID.' }]);
   }
+  return { limit, continuation, before, offset };
+}
+
+function filterForecastScorecard(data: Record<string, unknown>, params: Record<string, unknown>) {
+  const { forecastArchive, ...summary } = data;
+  if (params.view === undefined || params.view === 'summary') return summary;
+  if (params.view !== 'archive') throw new RpcValidationError('get_forecast_scorecard', [{ field: 'view', description: 'Expected summary or archive.' }]);
+  const { limit, continuation, before, offset } = forecastArchiveArguments(params);
   const archive = forecastArchive as ReturnType<typeof projectForecastArchive>;
   if (!archive) return { underAudit: data.underAudit, archive: null };
   const rows = archive.rows.filter(row => (!params.domain || argStr(row.domain) === argStr(params.domain))
@@ -2314,7 +2343,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_sanctions_data',
-    _validateArgs: params => { resolveCountryFilter(params.country, 'country'); },
+    _validateArgs: params => { sanctionsArguments(params); },
     title: 'Sanctions lists and pressure scores',
     _subscriptionOnly: true,
     _outputBudgetBytes: 131072,
@@ -2381,29 +2410,10 @@ export const CACHE_TOOLS: ToolDef[] = [
     }),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     _postFilter: (data, params) => {
-      if (params.screen !== undefined && (typeof params.screen !== 'string'
-        || params.screen.trim().length < 2 || params.screen.trim().length > 200)) {
-        throw new RpcValidationError('get_sanctions_data', [{ field: 'screen', description: 'Expected 2-200 characters.' }]);
-      }
-      if (params.min_score !== undefined && (typeof params.min_score !== 'number'
-        || !Number.isFinite(params.min_score) || params.min_score < 0 || params.min_score > 100)) {
-        throw new RpcValidationError('get_sanctions_data', [{ field: 'min_score', description: 'Expected a score from 0 to 100.' }]);
-      }
-      const countries = resolveCountryFilter(params.country, 'country');
+      const { countries, days, cursor } = sanctionsArguments(params);
       const etype = argStr(params.entity_type);
       const query = argStr(params.query);
       const limit = (argNum(params.limit) ?? DEFAULT_LIST_LIMIT);
-      const days = params.changes_since_days;
-      if (days !== undefined && params.screen !== undefined) {
-        throw new RpcValidationError('get_sanctions_data', [{ field: 'screen', description: 'Use screen without changes_since_days; history supports query.' }]);
-      }
-      const cursor = sanctionsChangesCursor(params.changes_cursor);
-      if (days === undefined && params.changes_cursor !== undefined) {
-        throw new RpcValidationError('get_sanctions_data', [{ field: 'changes_cursor', description: 'Requires changes_since_days.' }]);
-      }
-      if (days !== undefined && (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > 90)) {
-        throw new RpcValidationError('get_sanctions_data', [{ field: 'changes_since_days', description: 'Expected an integer from 1 to 90.' }]);
-      }
       if (days === undefined) delete data.changes;
       else {
         const snapshotAt = (data.changes as { fetchedAt?: number } | null)?.fetchedAt;
@@ -3307,11 +3317,11 @@ export const CACHE_TOOLS: ToolDef[] = [
     ],
   },
   {
-    name: 'get_tariff_trends',
+    name: 'get_price_and_debt_indicators',
     _validateArgs: params => { resolveCountryFilter(params.country, 'country'); },
     title: 'Big Mac, food price and debt indicators',
     _outputBudgetBytes: 131072,
-    description: 'Despite the name, carries no tariff data. Return the seeded price and debt indicator bundle: the Economist Big Mac index by country, the FAO Food Price Index and per-country national debt levels. Each sub-dataset has its own staleness budget (Big Mac a week, FAO and debt 60 days). No tariff rates: a dataset value of tariffs is rejected with a validation error. Seeded-cache read with no live fetch: weight 1 on API plans, included in the signed-in free allowance. dataset selects bigmac, fao-ffpi or national-debt; country narrows Big Mac and debt rows (alpha-2, alpha-3 or name); limit caps each list (default 30, 0 for no cap).',
+    description: 'Return the seeded price and debt indicator bundle: the Economist Big Mac index by country, the FAO Food Price Index and per-country national debt levels. Each sub-dataset has its own staleness budget (Big Mac a week, FAO and debt 60 days). No tariff rates: a dataset value of tariffs is rejected with a validation error. Seeded-cache read with no live fetch: weight 1 on API plans, included in the signed-in free allowance. dataset selects bigmac, fao-ffpi or national-debt; country narrows Big Mac and debt rows (alpha-2, alpha-3 or name); limit caps each list (default 30, 0 for no cap).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3349,7 +3359,7 @@ export const CACHE_TOOLS: ToolDef[] = [
       // The US MFN series left this free-account bundle (#9301): its REST
       // route is Pro, and get_tariff_averages serves it there.
       if (ds.includes('tariffs')) {
-        throw new RpcValidationError('get_tariff_trends', [{ field: 'dataset', description: 'The tariffs dataset moved to get_tariff_averages (Pro). Choose bigmac, fao-ffpi or national-debt.' }]);
+        throw new RpcValidationError('get_price_and_debt_indicators', [{ field: 'dataset', description: 'The tariffs dataset moved to get_tariff_averages (Pro). Choose bigmac, fao-ffpi or national-debt.' }]);
       }
       const countries = resolveCountryFilter(params.country, 'country');
       const limit = (argNum(params.limit) ?? DEFAULT_LIST_LIMIT);
@@ -3865,6 +3875,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_forecast_scorecard',
+    _validateArgs: params => { if (params.view === 'archive') forecastArchiveArguments(params); },
     title: 'Forecast accuracy scorecard',
     _outputBudgetBytes: 65536,
     description: forecastScorecardDescription(),
