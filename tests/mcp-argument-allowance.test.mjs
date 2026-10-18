@@ -4,7 +4,7 @@ import { dispatchToolsCall } from '../api/mcp/dispatch.ts';
 import { makePipelineMock } from './helpers/mcp-pro-deps.mjs';
 import { installRedis } from './helpers/fake-upstash-redis.mts';
 import { TOOL_REGISTRY } from '../api/mcp/registry/index.ts';
-import { validateToolArgs } from '../api/mcp/validate-args.ts';
+import { validateToolArgs } from '../api/mcp/_validate-args.ts';
 import { RpcValidationError } from '../api/mcp/billing-denial.ts';
 
 const originalFetch = globalThis.fetch;

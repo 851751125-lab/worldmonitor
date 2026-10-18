@@ -348,7 +348,7 @@ The most common error code, shared across `tools/call`, `prompts/get`, `resource
 |--------------------------------------------------------|-----------------------------------|----------------------------------------------------------------------------|
 | `tools/call` with no/non-string `name`                 | `api/mcp/dispatch.ts` `dispatchToolsCall` param guard | `Invalid params: missing tool name`                         |
 | `tools/call` with `name` that isn't in the registry    | `api/mcp/dispatch.ts` `dispatchToolsCall` registry lookup | `Unknown tool: get_foo`                                  |
-| `tools/call` arguments fail the input schema or country-resolution hook | `api/mcp/validate-args.ts`, before allowance reservation | `Invalid params` — with `error.data.violations[]`, an array of `{field, description}` pairs |
+| `tools/call` arguments fail the input schema or country-resolution hook | `api/mcp/_validate-args.ts`, before allowance reservation | `Invalid params` — with `error.data.violations[]`, an array of `{field, description}` pairs |
 | `prompts/get` with no/non-string `name`                | `api/mcp/handler.ts` `prompts/get` switch branch       | `Invalid params: missing prompt name`                        |
 | `prompts/get` with unknown name or missing required arg | `api/mcp/prompts/index.ts` `buildPromptResponse`       | `Unknown prompt: …` / `Missing required argument "iso2" for prompt "country-briefing"` |
 | `resources/read` with no/unknown/malformed `uri`       | `api/mcp/resources/index.ts` (`buildPublicResourceResponse` / `buildResourceResponse`) | `Invalid params: missing resource uri` / `Unknown resource uri "..."` |
