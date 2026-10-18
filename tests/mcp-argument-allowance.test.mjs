@@ -116,6 +116,7 @@ for (const [name, args, field] of [
   ['get_bilateral_tariff', { reporter: 'US', partner: 'CN', hs_code: 'bad' }, 'hs_code'],
   ['get_us_import_duty', { partner: 'CN', hs_code: 'bad' }, 'hs_code'],
   ['get_food_stocks', { country_code: 'Atlantis' }, 'country_code'],
+  ['get_food_stocks', { country_code: 'EG', commodity: 'potatoes' }, 'commodity'],
   ['search_intel_history', { query: 'shipping', country: 'Atlantis' }, 'country'],
   ['get_similar_events', { situation: 'a naval blockade', country: 'Atlantis' }, 'country'],
   ['get_intel_timeline', { country: 'Atlantis' }, 'country'],
@@ -207,6 +208,14 @@ it('country hooks reject unresolved filters while retaining aliases and Eurostat
   }
   for (const name of ['get_eu_housing_cycle', 'get_eu_quarterly_gov_debt', 'get_eu_industrial_production']) {
     assert.doesNotThrow(() => TOOL_REGISTRY.find(tool => tool.name === name)._validateArgs({ countries: ['EA20', 'EU27_2020', 'EL'] }));
+  }
+});
+
+it('food stocks preserves omitted and empty commodities and downstream aliases', () => {
+  const tool = TOOL_REGISTRY.find(tool => tool.name === 'get_food_stocks');
+  assert.doesNotThrow(() => validateToolArgs(tool, { country_code: 'EG' }));
+  for (const commodity of ['', '  ', 'wheat', 'corn', 'maize', 'rice', 'soy', 'soybean', 'soybeans', 'barley', 'palmOil', 'palm_oil', 'palm-oil', ' PALM OIL ']) {
+    assert.doesNotThrow(() => validateToolArgs(tool, { country_code: 'EG', commodity }), commodity);
   }
 });
 

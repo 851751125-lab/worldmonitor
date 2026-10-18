@@ -33,6 +33,7 @@ import { utf8ByteLength } from '../utils';
 import filterParamContracts from '../../../shared/openapi-filter-param-contracts.json';
 import { normalizeCountry } from '../../../server/_shared/intel-history-client';
 import { normalizePassengerCount } from '../../../server/_shared/passenger-count';
+import { normalizeFoodStocksCommodity } from '../../../server/worldmonitor/resilience/v1/_food-stocks-query';
 import {
   CORROBORATION_OUTPUT_SCHEMA,
   PUBLISHER_ROSTER_OUTPUT_PROPERTIES,
@@ -2111,7 +2112,14 @@ export const RPC_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_food_stocks',
-    _validateArgs: params => { foodStocksCountry(params); },
+    _validateArgs: params => {
+      foodStocksCountry(params);
+      if (normalizeFoodStocksCommodity(typeof params.commodity === 'string' ? params.commodity : '') === null) {
+        throw new RpcValidationError('get-food-stocks', [{
+          field: 'commodity', description: 'commodity must be one of wheat, corn, rice, soybeans, barley, palmOil',
+        }]);
+      }
+    },
     title: 'Cereal stocks-to-use ratios',
     _outputBudgetBytes: 131072,
     description: 'USDA PSD cereal stocks-to-use by marketing year. Ask for a country (ISO-2) plus optional commodity (wheat, corn, rice, soybeans, barley, palmOil), or country_code=WORLD for the global balance. Returns ending stocks, production, use, and the stocks-to-use ratio. Marketing years are not calendar years and must not be compared across countries as if they were.',
