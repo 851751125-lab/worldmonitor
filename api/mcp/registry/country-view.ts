@@ -3,6 +3,7 @@ import { RAW_SIGNAL_READS, RAW_SIGNAL_FAMILIES, RAW_SIGNAL_BODY_BYTES, RAW_SIGNA
 import { COUNTRY_READERS, countryReaderSchema, countryViewSchema, panelAdmissionSchema, type CountryReader } from '../../../shared/country-brief-host';
 import { BRIEF_TOPICS } from '../../../shared/country-brief-sections';
 import { resolveCountryCode } from '../../../shared/country-code-resolve';
+import { normalizeFoodStocksCommodity } from '../../../server/worldmonitor/resilience/v1/_food-stocks-query';
 import { buildAuthHeaders } from '../auth';
 import { assertToolFetchOk, BillingDenialError, RpcValidationError, throwIfBillingDenial } from '../billing-denial';
 import { readBoundedResponseBody } from '../bounded-body';
@@ -26,6 +27,9 @@ function countrySectionArguments(params: Record<string, unknown>) {
   const reader = COUNTRY_READERS[section];
   const args = reader.args.safeParse(parsed.data.arguments);
   if (!args.success) throw new RpcValidationError('get_country_brief_section', [{ field: 'arguments', description: 'Invalid arguments for this country section.' }]);
+  if (section === 'food' && 'commodity' in args.data && normalizeFoodStocksCommodity(args.data.commodity) === null) {
+    throw new RpcValidationError('get_country_brief_section', [{ field: 'arguments.commodity', description: 'Supply a supported food commodity.' }]);
+  }
   return { parsed, section, reader, args };
 }
 

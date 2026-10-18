@@ -117,6 +117,7 @@ for (const [name, args, field] of [
   ['get_us_import_duty', { partner: 'CN', hs_code: 'bad' }, 'hs_code'],
   ['get_food_stocks', { country_code: 'Atlantis' }, 'country_code'],
   ['get_food_stocks', { country_code: 'EG', commodity: 'potatoes' }, 'commodity'],
+  ['get_country_brief_section', { section: 'food', arguments: { countryCode: 'EG', commodity: 'potatoes' } }, 'arguments.commodity'],
   ['search_intel_history', { query: 'shipping', country: 'Atlantis' }, 'country'],
   ['get_similar_events', { situation: 'a naval blockade', country: 'Atlantis' }, 'country'],
   ['get_intel_timeline', { country: 'Atlantis' }, 'country'],
@@ -183,6 +184,7 @@ for (const [name, args] of [
   ['get_country_brief_section', { section: 'signalsRaw', arguments: { country_code: 'ZZ' } }],
   ['open_news_dashboard', { map_latitude: 1 }],
   ['get_alert_digest', { view: 'today', movers_days: 7 }],
+  ['get_country_brief_section', { section: 'food', arguments: { countryCode: 'EG', commodity: 'potatoes' } }],
 ]) {
   it(`API ${name} validates local refinements before spending allowance`, async () => {
     const { pipe, fetches } = setup();
@@ -246,6 +248,7 @@ it('food stocks preserves omitted and empty commodities and downstream aliases',
   assert.doesNotThrow(() => validateToolArgs(tool, { country_code: 'EG' }));
   for (const commodity of ['', '  ', 'wheat', 'corn', 'maize', 'rice', 'soy', 'soybean', 'soybeans', 'barley', 'palmOil', 'palm_oil', 'palm-oil', ' PALM OIL ']) {
     assert.doesNotThrow(() => validateToolArgs(tool, { country_code: 'EG', commodity }), commodity);
+    assert.doesNotThrow(() => validateToolArgs(TOOL_REGISTRY.find(tool => tool.name === 'get_country_brief_section'), { section: 'food', arguments: { countryCode: 'EG', commodity } }), commodity);
   }
 });
 
