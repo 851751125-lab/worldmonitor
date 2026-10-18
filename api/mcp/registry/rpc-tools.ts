@@ -1069,6 +1069,7 @@ const VULNERABILITY_COMPONENTS_OUTPUT_SCHEMA = {
 export const RPC_TOOLS: ToolDef[] = [
   {
     name: 'get_defense_industrial_base',
+    _validateArgs: params => { requireCountryCode(params.country_code, 'get-defense-industrial-base'); },
     title: 'Defense industrial base',
     _outputBudgetBytes: 16_384,
     description: 'Return one country\'s defense industrial base: the latest World Bank military-capacity indicators (spending, personnel, arms trade) and SIPRI-derived five-year major-weapons supplier shares with a concentration measure, answering who supplies the country\'s arms and how dependent it is on them. Values are annual and carry their observation year; SIPRI TIV is a transfer-volume index, not currency. Requires a paid plan; one downstream fetch of seeded data, weight 2 on API plans. country_code is ISO 3166-1 alpha-2 (UA, DE, IN). Read-only.',
@@ -1542,6 +1543,7 @@ export const RPC_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_country_brief',
+    _validateArgs: params => { requireCountryCode(params.country_code, 'get-country-brief'); },
     title: 'AI-written country assessment (text)',
     // Two downstream fetches (brief + news digest for grounding).
     _weight: 3,
@@ -1795,6 +1797,7 @@ export const RPC_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_country_risk',
+    _validateArgs: params => { requireCountryCode(params.country_code, 'get-country-risk'); },
     title: 'Country instability score, advisory and sanctions',
     _outputBudgetBytes: 262144,
     description: 'Return the structured risk snapshot for one country: the Composite Instability Index at cii.combinedScore (0-100) with its four components under cii.components, the government travel-advisory level, and OFAC sanctions exposure as sanctionsActive and sanctionsCount. Index scores, advisory and sanctions fields only, read from the seeded risk cache in under a second: no narrative, no LLM, and no per-indicator resilience breakdown. upstreamUnavailable=true means a required upstream read failed and the whole response was withheld: zeroed fields are unknown, not calm. Requires a paid plan; one downstream fetch, weight 2 on API plans. On a dedicated Pro allowance a call shares the same-country panel allocation; refresh with request_id starts a new one. Read-only; idempotent within a cache window. history_days (1-90) adds ciiHistory: one UTC daily close per day, the change over the span, and methodology breaks.',
@@ -1886,6 +1889,7 @@ export const RPC_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_country_coverage',
+    _validateArgs: params => { requireCountryCode(params.country_code, 'get-country-coverage'); },
     title: 'Country coverage timeline',
     // No _weight override: _execute signs one gateway fetch, so the derived
     // default of 2 is already correct. The fan-out to two coverage feeds and
@@ -3211,6 +3215,7 @@ export const RPC_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_supply_vulnerabilities',
+    _validateArgs: params => { requireCountryCode(params.country_code, 'get-supply-vulnerabilities'); },
     title: 'Commodity supply risks',
     // No `_attribution`: enforceCommodityRedistributionPolicy has already
     // blanked score/band/source-concentration and dropped every

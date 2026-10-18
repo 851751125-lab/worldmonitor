@@ -63,7 +63,7 @@ const COUNTRY_SECTION_DOCS: Record<CountryReader, { summary: string; args: Recor
 };
 
 function describedSectionArguments(section: CountryReader): Record<string, unknown> {
-  const schema = z.toJSONSchema(COUNTRY_READERS[section].args) as Record<string, unknown>;
+  const schema = z.toJSONSchema(COUNTRY_READERS[section].args, { io: 'input' }) as Record<string, unknown>;
   const docs = COUNTRY_SECTION_DOCS[section];
   const properties = { ...((schema.properties as Record<string, Record<string, unknown>> | undefined) ?? {}) };
   for (const field of Object.keys(properties)) {

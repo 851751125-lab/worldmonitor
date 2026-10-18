@@ -249,7 +249,7 @@ describe('MCP RPC ValidationError preservation', () => {
     try {
       await callTool(
         'get_food_stocks',
-        {},
+        { country_code: 'EG' },
         async () => json400([{ field: 'countryCode', description: 'countryCode is required' }]),
       );
     } finally {

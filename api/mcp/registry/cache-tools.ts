@@ -1454,6 +1454,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_news_intelligence',
+    _validateArgs: params => { resolveCountryFilter(params.country, 'country'); },
     title: 'Threat news stories and signals',
     _uiResourceUri: NEWS_INTELLIGENCE_UI_URI,
     _outputBudgetBytes: 131072,
@@ -1791,6 +1792,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_cyber_threats',
+    _validateArgs: params => { resolveCountryFilter(params.country, 'country'); },
     title: 'Cyber threat intelligence',
     _outputBudgetBytes: 131072,
     description: 'Return the seeded cyber-threat snapshot: malware indicators of compromise (URLhaus, Feodo Tracker), CISA Known Exploited Vulnerabilities and active command-and-control infrastructure, each with type, severity, country when known, and first-seen time. Flagged stale after 4 hours. Indicator feeds only; no incident narratives or attribution analysis. Seeded-cache read with no live fetch: weight 1 on API plans, included in the signed-in free allowance. threat_type is a case-insensitive substring (malware, vulnerability, c2); min_severity keeps known severities at or above a level; country drops threats without a country; limit caps the list (default 30, 0 for no cap).',
@@ -1846,6 +1848,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_economic_data',
+    _validateArgs: params => { resolveCountryFilter(params.country, 'country'); },
     title: 'Rates, economic calendars and fuel prices',
     _outputBudgetBytes: 131072,
     description: 'Read cached rates, calendars and fuel prices with official-only 12-series China macro (no proxies, see launchReady). Includes Fed Funds (FRED), economic and official NBS/PBoC release calendars, fuel prices, ECB FX rates, Bank of Russia official rates (RUB per 1 unit of each listed currency, plus the CBR key policy rate), EU yield curves, US federal spending awards, earnings, COT positioning, BIS household debt service ratios, and BIS residential/commercial property prices. Optional China macro data has official-only 12-series; 5 NBS/SAFE ingestible, PBoC/GACC unavailable, no proxies; see launchReady/status. Retained values expose transportStatus and transportFailureReason independently. Requested datasets may be unavailable or stale; this tool reads cached data and does not fetch fresh upstream releases.',
@@ -2045,6 +2048,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_country_macro',
+    _validateArgs: params => { resolveCountryFilter(params.countries, 'countries'); },
     title: 'Country macroeconomic indicators',
     _outputBudgetBytes: 131072,
     description: 'Per-country macroeconomic indicators from IMF WEO (~210 countries, monthly cadence). Bundles fiscal/external balance (inflation, current account, gov revenue/expenditure/primary balance, CPI), growth & per-capita (real GDP growth, GDP/capita USD & PPP, savings & investment rates, savings-investment gap), labor & demographics (unemployment, population), and external trade (current account USD, import/export volume % changes). Latest available year per series. Use for country-level economic screening, peer benchmarking, and stagflation/imbalance flags. NOTE: export/import LEVELS in USD (exportsUsd, importsUsd, tradeBalanceUsd) are returned as null — WEO retracted broad coverage for BX/BM indicators in 2026-04; use currentAccountUsd or volume changes (import/exportVolumePctChg) instead.',
@@ -2094,6 +2098,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_eu_housing_cycle',
+    _validateArgs: params => { resolveEurostatCountryFilter(params.countries); },
     title: 'EU house price index',
     _outputBudgetBytes: 131072,
     description: 'Eurostat annual house price index (prc_hpi_a, base 2015=100) for all 27 EU members plus EA20 and EU27_2020 aggregates. Each country entry includes the latest value, prior value, date, unit, and a 10-year sparkline series. Complements BIS WS_SPP with broader EU coverage for the Housing cycle tile.',
@@ -2134,6 +2139,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_eu_quarterly_gov_debt',
+    _validateArgs: params => { resolveEurostatCountryFilter(params.countries); },
     title: 'EU quarterly government debt',
     _outputBudgetBytes: 131072,
     description: 'Eurostat quarterly general government gross debt (gov_10q_ggdebt, %GDP) for all 27 EU members plus EA20 and EU27_2020 aggregates. Each country entry includes latest value, prior value, quarter label, and an 8-quarter sparkline series. Provides fresher debt-trajectory signal than annual IMF GGXWDG_NGDP for EU panels.',
@@ -2174,6 +2180,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_eu_industrial_production',
+    _validateArgs: params => { resolveEurostatCountryFilter(params.countries); },
     title: 'EU industrial production',
     _outputBudgetBytes: 131072,
     description: 'Return the Eurostat monthly industrial production index (sts_inpr_m: NACE B-D industry excluding construction, seasonally and calendar adjusted, 2021=100) for the 27 EU members plus the EA20 and EU27_2020 aggregates. Each country entry has the latest value, prior value, month label and a 12-month series. Monthly data; the seed is flagged stale after 5 days. Covers the EU industrial index only; no other production or GDP measures. Seeded-cache read with no live fetch: weight 1 on API plans, included in the signed-in free allowance. countries uses Eurostat geo codes (ISO alpha-2 except EL for Greece); limit caps the country map when no filter is given (default 30, 0 for no cap).',
@@ -2307,6 +2314,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_sanctions_data',
+    _validateArgs: params => { resolveCountryFilter(params.country, 'country'); },
     title: 'Sanctions lists and pressure scores',
     _subscriptionOnly: true,
     _outputBudgetBytes: 131072,
@@ -2551,6 +2559,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_displacement_data',
+    _validateArgs: params => { resolveCountryFilter(params.countries, 'countries'); },
     title: 'Refugee and displacement counts',
     _outputBudgetBytes: 131072,
     description: 'Return UNHCR annual displacement statistics for one reporting year (summary.year): global totals and per-country refugees, asylum seekers, IDPs and stateless people by origin, totals hosted by each asylum country, and the largest origin-to-asylum refugee flows, with centroid coordinates where known. Answers how many people a country has displaced or hosts. Annual stock figures only: no monthly arrivals, live crisis-situation updates or deaths, and no year selection; until UNHCR publishes the current year the snapshot holds the prior year, which summary.year names. Flagged stale after 60 hours. Seeded-cache read: weight 1 on API plans, included in the signed-in free allowance. countries keeps rows whose origin or asylum country matches; limit caps the country and flow lists (default 30, 0 for no cap).',
@@ -2622,6 +2631,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_health_signals',
+    _validateArgs: params => { resolveCountryFilter(params.country, 'country'); },
     title: 'Disease outbreaks and air quality',
     _outputBudgetBytes: 131072,
     description: 'Active disease outbreaks (WHO/ECDC etc.) and global air-quality station readings (OpenAQ/WAQI PM2.5). For health-risk screening.',
@@ -2708,6 +2718,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_energy_intelligence',
+    _validateArgs: params => { resolveCountryFilter(params.country, 'country'); },
     title: 'Energy supply, prices and disruptions',
     _outputBudgetBytes: 131072,
     description: 'Return the seeded energy bundle: EIA petroleum stocks, Ember electricity prices and generation mix, GIE national gas storage (fill percentage, stored TWh, observation date per country), fuel shortages, active energy disruptions, government crisis policies, fossil-electricity share and World Bank renewable share. Each sub-dataset carries its own seed time and staleness budget (gas storage and electricity are flagged stale after 2 days, crisis policies only after many months). _countries is a coverage index only, and null observations mean unavailable, not zero. Seeded-cache read with no live fetch: weight 1 on API plans, included in the signed-in free allowance. dataset selects sub-datasets, country narrows the country-keyed ones, limit caps each list (default 30, 0 for no cap).',
@@ -2941,6 +2952,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_climate_data',
+    _validateArgs: params => { resolveCountryFilter(params.country, 'country'); },
     title: 'Climate anomalies and disasters',
     _outputBudgetBytes: 131072,
     description: 'Return the seeded climate bundle: temperature and precipitation anomalies against 30-year WMO normals, climate-relevant disaster alerts (ReliefWeb, GDACS, FIRMS), the NOAA Mauna Loa CO2 trend, OpenAQ/WAQI PM2.5 station readings, NSIDC/NOAA Arctic sea-ice extent and ocean-heat indicators, active weather alerts and climate news. Each sub-dataset carries its own seed time and staleness budget (anomalies are flagged stale after 2 h, CO2 and sea ice after 2 days). Seeded-cache read with no live fetch: weight 1 on API plans, included in the signed-in free allowance. dataset selects sub-datasets, country narrows the disaster and air-quality lists, limit caps each list (default 30, 0 for no cap).',
@@ -3296,6 +3308,7 @@ export const CACHE_TOOLS: ToolDef[] = [
   },
   {
     name: 'get_tariff_trends',
+    _validateArgs: params => { resolveCountryFilter(params.country, 'country'); },
     title: 'Big Mac, food price and debt indicators',
     _outputBudgetBytes: 131072,
     description: 'Despite the name, carries no tariff data. Return the seeded price and debt indicator bundle: the Economist Big Mac index by country, the FAO Food Price Index and per-country national debt levels. Each sub-dataset has its own staleness budget (Big Mac a week, FAO and debt 60 days). No tariff rates: a dataset value of tariffs is rejected with a validation error. Seeded-cache read with no live fetch: weight 1 on API plans, included in the signed-in free allowance. dataset selects bigmac, fao-ffpi or national-debt; country narrows Big Mac and debt rows (alpha-2, alpha-3 or name); limit caps each list (default 30, 0 for no cap).',
