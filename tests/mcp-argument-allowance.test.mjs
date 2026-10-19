@@ -11,7 +11,7 @@ const originalFetch = globalThis.fetch;
 const originalEnv = { ...process.env };
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  for (const key of ['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'MCP_TELEMETRY']) {
+  for (const key of ['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'MCP_TELEMETRY', 'MCP_INTERNAL_HMAC_SECRET']) {
     if (originalEnv[key] === undefined) delete process.env[key];
     else process.env[key] = originalEnv[key];
   }
@@ -47,7 +47,7 @@ const call = (pipe, name, args, budget, freeAccount) => dispatchToolsCall(
 
 for (const [meter, budget, freeAccount] of meters) {
   for (const [name, args, field] of [
-    ['get_tariff_trends', { dataset: ['tariffs'] }, 'dataset'],
+    ['get_tariff_trends', { dataset: ['tariffs', 'bigmac'] }, 'dataset'],
     ['get_price_and_debt_indicators', { dataset: ['tariffs'] }, 'dataset'],
     ['get_tariff_trends', { country: 'Atlantis' }, 'country'],
     ['get_price_and_debt_indicators', { country: 'Atlantis' }, 'country'],
@@ -156,6 +156,58 @@ for (const [meter, budget] of meters.slice(1)) {
       assert.equal(fetches(), 0);
     });
   }
+}
+
+for (const [meter, budget] of meters.slice(1)) {
+  for (const [args, field] of [
+    [{ operation: 'analysis', symbols: ['AAPL', 'MSFT'] }, 'symbols'],
+    [{ operation: 'backtest', symbols: ['AAPL', 'MSFT'] }, 'symbols'],
+    [{ operation: 'analysis', symbols: ['??'] }, 'symbols'],
+    [{ operation: 'history', symbols: ['  '] }, 'symbols'],
+    [{ operation: 'backtest', symbols: ['AAPL'], include_news: false }, 'include_news'],
+    [{ operation: 'analysis', symbols: ['AAPL'], limit_per_symbol: 4 }, 'limit_per_symbol'],
+    [{ operation: 'history', symbols: ['AAPL'], eval_window_days: 10 }, 'eval_window_days'],
+  ]) {
+    it(`${meter}: stock research rejects ${JSON.stringify(args)} without spending allowance`, async () => {
+      const { pipe, fetches } = setup();
+      const body = await (await call(pipe, 'get_stock_research', args, budget, false)).json();
+      assert.equal(body.error?.code, -32602, JSON.stringify(body));
+      assert.equal(body.error.data.violations[0].field, field);
+      assert.equal(pipe.count, 2, 'daily counter must remain unchanged');
+      assert.deepEqual(pipe.ops, [], 'validation must precede every reservation');
+      assert.equal(fetches(), 0, 'invalid arguments must not fetch data');
+    });
+  }
+
+  for (const operation of ['analysis', 'backtest', 'history', 'stored-backtests']) {
+    it(`${meter}: valid stock ${operation} remains charged and normalizes symbols`, async () => {
+      const { pipe } = setup();
+      process.env.MCP_INTERNAL_HMAC_SECRET = 'stock-allowance-test-secret';
+      let fetches = 0;
+      globalThis.fetch = async input => {
+        fetches++;
+        const url = new URL(String(input));
+        const single = operation === 'analysis' || operation === 'backtest';
+        assert.equal(url.searchParams.get(single ? 'symbol' : 'symbols'), 'AAPL');
+        return Response.json(single ? { available: false, symbol: 'AAPL' } : { items: [] });
+      };
+      const body = await (await call(pipe, 'get_stock_research', { operation, symbols: [' aapl '] }, budget, false)).json();
+      assert.equal(body.error, undefined, JSON.stringify(body));
+      assert.notEqual(body.result?.isError, true, JSON.stringify(body));
+      assert.equal(pipe.count, meter === 'API' ? 4 : 3);
+      assert.equal(fetches, 1);
+    });
+  }
+
+  it(`${meter}: stock data fetch failures remain charged`, async () => {
+    const { pipe } = setup();
+    process.env.MCP_INTERNAL_HMAC_SECRET = 'stock-allowance-test-secret';
+    let fetches = 0;
+    globalThis.fetch = async () => { fetches++; throw new Error('controlled upstream outage'); };
+    await call(pipe, 'get_stock_research', { operation: 'analysis', symbols: ['AAPL'] }, budget, false);
+    assert.equal(pipe.count, meter === 'API' ? 4 : 3, 'no refund after execution starts');
+    assert.equal(fetches, 1);
+  });
 }
 
 it('invalid panel openings and refreshes do not allocate a paid panel', async () => {
