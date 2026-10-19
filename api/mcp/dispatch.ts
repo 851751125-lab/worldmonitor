@@ -559,7 +559,9 @@ export async function dispatchToolsCall(
   // Panel allocation can also spend quota, so reject caller-input errors
   // before entering either the panel or standalone reservation path.
   try {
-    validateToolArgs(tool, p.arguments === undefined ? {} : p.arguments);
+    // Aliases retain legacy argument shapes and validate their translated values.
+    if (aliasArguments) tool._validateArgs?.(aliasArguments);
+    else validateToolArgs(tool, p.arguments === undefined ? {} : p.arguments);
   } catch (error) {
     if (!(error instanceof RpcValidationError)) throw error;
     return rpcError(id, -32602, 'Invalid params', corsHeaders, { violations: error.violations });
