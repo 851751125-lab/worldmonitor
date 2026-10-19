@@ -286,9 +286,10 @@ function fenceHealthMutations(commands, token) {
     : [op, key, ...args]);
 }
 
-// Iran-events domain sunset (war ended 2026-07). Default OFF everywhere; set
-// IRAN_EVENTS_ENABLED=true to restore the whole domain. Mirrors the backend
-// *_ENABLED env idiom (server/worldmonitor/resilience/v1/_shared.ts).
+// Middle East strike feed (conflict:iran-events:v1, produced by ais-relay from
+// Telegram + GDELT). Default OFF everywhere; IRAN_EVENTS_ENABLED=true enables
+// the producer and every reader. Mirrors the backend *_ENABLED env idiom
+// (server/worldmonitor/resilience/v1/_shared.ts).
 const IRAN_EVENTS_ENABLED = (process.env.IRAN_EVENTS_ENABLED ?? 'false').toLowerCase() === 'true';
 
 const BOOTSTRAP_KEYS = {
@@ -419,6 +420,9 @@ const STANDALONE_KEYS = {
   // evicted or stale index stays invisible until the next weekly freeze.
   gdeltCountryArticles: 'gdelt:bulk:country-articles:v1',
   gdeltDyadTension: 'gdelt:bulk:dyad-tension:v1',
+  // Per-country GDELT conflict counts and own-baseline medians, read only by the
+  // CII conflict component (get-risk-scores), so monitored here.
+  gdeltCountryEvents: 'gdelt:bulk:country-events:v1',
   chinaCoverage:      CHINA_COVERAGE_SUMMARY_KEY,
   // Control-plane heartbeat only. Convex owns every durable scan lease,
   // checkpoint, receipt, and replay decision; this Redis value is disposable.
@@ -482,6 +486,7 @@ const STANDALONE_KEYS = {
   // plan 2026-04-25-004 Phase 2: financialSystemExposure data keys.
   wbExternalDebt:       'economic:wb-external-debt:v1',
   bisLbs:               'economic:bis-lbs:v1',
+  capitalFlows:         'economic:capital-flows:v1',
   fatfListing:          'economic:fatf-listing:v1',
   climateZoneNormals:    'climate:zone-normals:v1',
   shippingRates:         'supply_chain:shipping:v2',
@@ -628,6 +633,7 @@ const STANDALONE_KEYS = {
   jodiGas:                  'energy:jodi-gas:v1:_countries',
   lngVulnerability:         'energy:lng-vulnerability:v1',
   jodiOil:                  'energy:jodi-oil:v1:_countries',
+  oilTradeSeries:           'energy:oil-trade-series:v1',
   chokepointBaselines:      'energy:chokepoint-baselines:v1',
   portwatchChokepointsRef:  'portwatch:chokepoints:ref:v1',
   chokepointFlows:          'energy:chokepoint-flows:v1',
@@ -982,6 +988,19 @@ const SEED_META = {
   // plan 2026-04-25-004 Phase 2: financialSystemExposure component seeders.
   // Bundle: scripts/seed-bundle-macro.mjs (Codex R1 #5, Option A).
   wbExternalDebt:   { key: 'seed-meta:economic:wb-external-debt', maxStaleMin: 100800 }, // annual WB IDS publication; 70d threshold matches IMF cadence pattern
+  // Weekly macro-bundle seed of quarterly IMF BOP/PIP + BIS LBS (#9394);
+  // 10d = weekly interval + slack. Activation marker bridges deploy-before-first-tick.
+  capitalFlows: {
+    key: 'seed-meta:economic:capital-flows',
+    maxStaleMin: 14400,
+    activationKey: 'seed-activated:economic:capital-flows',
+    cutover: {
+      mode: 'activation-marker',
+      fromKey: null,
+      issue: 9394,
+      activationKey: 'seed-activated:economic:capital-flows',
+    },
+  },
   bisLbs:           { key: 'seed-meta:economic:bis-lbs',          maxStaleMin: 14400 }, // BIS LBS quarterly publication; 10d threshold = ~1× publish lag tolerance after macro bundle daily refresh
   fatfListing:      { key: 'seed-meta:economic:fatf-listing',     maxStaleMin: 60480 }, // FATF plenary 3×/year; 42d threshold = >1 plenary cycle (catches missed-update if cron silently fails)
   shippingRates:    { key: 'seed-meta:supply_chain:shipping',     maxStaleMin: 420 },
@@ -998,7 +1017,7 @@ const SEED_META = {
     activationKey: CII_RISK_SCORE_CACHE_KEYS.dailyHistoryActivation,
     cutover: { mode: 'activation-marker', fromKey: null, issue: 9354, activationKey: CII_RISK_SCORE_CACHE_KEYS.dailyHistoryActivation },
   },
-  iranEvents:       { key: 'seed-meta:conflict:iran-events',      maxStaleMin: 20160 }, // manual seed from LiveUAMap; 20160 = 14d = 2× weekly cadence
+  iranEvents:       { key: 'seed-meta:conflict:iran-events',      maxStaleMin: 45 }, // ais-relay Middle East strike loop (Telegram + GDELT) every 10min; 45 = 4 missed ticks. The relay withholds seed-meta when the Telegram poll is stale or the classifier fails, so either outage turns STALE_SEED rather than reading a frozen feed as fresh.
   ucdpEvents:       { key: 'seed-meta:conflict:ucdp-events',      maxStaleMin: 420 },
   ucdpEventsBootstrap: { key: 'seed-meta:conflict:ucdp-events-bootstrap', maxStaleMin: 420 }, // Same cron. Monitored separately because the bootstrap tier now hydrates from the compact projection, and a transform/write failure there must not hide behind a healthy canonical key (#5300).
   acledIntel:       { key: 'seed-meta:conflict:acled-intel',      maxStaleMin: 38 }, // conflict:acled:v1:all:0:0, now ACLED-or-GDELT fallback for the forecast EMA input (#5099).
@@ -1226,6 +1245,16 @@ const SEED_META = {
     cutover: {
       mode: 'activation-marker', fromKey: null, issue: 8676,
       activationKey: 'seed-activated:gdelt:bulk:dyad-tension',
+    },
+  },
+  // Same materializer tick; pending until its first country-events publish
+  // writes the durable marker, strict after it. The 32-day data TTL outlives this gate.
+  gdeltCountryEvents: {
+    key: 'seed-meta:gdelt:bulk:country-events', maxStaleMin: 45,
+    activationKey: 'seed-activated:gdelt:bulk:country-events',
+    cutover: {
+      mode: 'activation-marker', fromKey: null, issue: 7582,
+      activationKey: 'seed-activated:gdelt:bulk:country-events',
     },
   },
   // Same materializer tick as gdeltIntel; the 2-day data TTL outlives this
@@ -1859,6 +1888,21 @@ const SEED_META = {
   // (newestItemAt/maxContentAgeMin in seed-meta) — a frozen upstream file
   // reads STALE_CONTENT rather than passing as fresh.
   jodiOil:              { key: 'seed-meta:energy:jodi-oil',               maxStaleMin: 60 * 24 * 40, chinaRow: true }, // monthly 35d cadence; 40d = cadence + 5d late-publisher grace. Data/meta TTL is 70d (2× cadence) so last-good outlives this gate and one missed monthly publish.
+  // Weekly bundle tick (seed-bundle-energy-sources); 14d = two missed runs. minRecordCount
+  // mirrors MIN_COUNTRIES_WITH_PRODUCTION in scripts/seed-oil-trade-series.mjs. Content age is
+  // the newest EIA STEO month (newestItemAt/maxContentAgeMin in seed-meta).
+  oilTradeSeries: {
+    key: 'seed-meta:energy:oil-trade-series',
+    maxStaleMin: 20160,
+    minRecordCount: 18,
+    activationKey: 'seed-activated:energy:oil-trade-series',
+    cutover: {
+      mode: 'activation-marker',
+      fromKey: null,
+      issue: 9392,
+      activationKey: 'seed-activated:energy:oil-trade-series',
+    },
+  },
   ieaOilStocks:         { key: 'seed-meta:energy:iea-oil-stocks',        maxStaleMin: 60 * 24 * 40 }, // monthly cron on 15th; 40d threshold = TTL_SECONDS
   oilStocksAnalysis:    { key: 'seed-meta:energy:oil-stocks-analysis',   maxStaleMin: 60 * 24 * 50 }, // afterPublish of ieaOilStocks; 50d = matches seed-meta TTL (exceeds 40d data TTL)
   eiaPetroleum:         { key: 'seed-meta:energy:eia-petroleum',         maxStaleMin: 4320 }, // daily bundle cron (seed-bundle-energy-sources); 72h = 3× interval, well under 7d data TTL
@@ -2042,9 +2086,9 @@ for (const market of CONSUMER_PRICE_HEALTH_MARKETS) {
   };
 }
 
-// Iran-events sunset: when disabled (default), drop it from all health
-// classification so the deliberately-dormant manual seed can't raise
-// STALE_SEED (present-but-stale) or EMPTY (absent). Re-enabling restores both.
+// Middle East strike feed: when disabled (default), the relay producer does
+// not run, so drop the key from all health classification; otherwise it would
+// raise STALE_SEED or EMPTY for a feed that is off by design. Re-enabling restores both.
 if (!IRAN_EVENTS_ENABLED) {
   delete BOOTSTRAP_KEYS.iranEvents;
   delete SEED_META.iranEvents;
@@ -2092,7 +2136,12 @@ const ON_DEMAND_KEYS = new Set([
   // daily tick publishes. seed-dtm-displacement.mjs SETs the marker after its
   // first successful publish.
   'dtmDisplacement',
+  // Same bridge for the oil trade series: the reader ships before the energy
+  // bundle's first tick publishes. seed-oil-trade-series.mjs SETs the marker.
+  'oilTradeSeries',
   // Same bridge for the UNHCR cross-border movements (#9023).
+  // Deploy-before-first-tick bridge for the weekly capital-flows seed (#9394).
+  'capitalFlows',
   'crossBorderArrivals',
   // Same deploy-before-first-tick bridge as cbrRates for the two Canada
   // national-statistics seeders: bocValet (#6616) and statcanWds (#6676).
@@ -2128,6 +2177,7 @@ const ON_DEMAND_KEYS = new Set([
   // pending until that first tick and strict afterward.
   'gdeltCountryArticles',
   'gdeltDyadTension',
+  'gdeltCountryEvents',
   // Scheduled producer. The marker is written only after a successful
   // publish of the canonical snapshot. Before that first publish, absence is
   // pending activation; after it, missing or stale data is strict.
@@ -2239,8 +2289,12 @@ const ACTIVATION_MARKERS = {
   cbrRates: 'seed-activated:economic:cbr-rates',
   // Written by scripts/seed-dtm-displacement.mjs in runSeed's afterPublish hook.
   dtmDisplacement: SEED_META.dtmDisplacement.activationKey,
+  // Written by scripts/seed-oil-trade-series.mjs in runSeed's afterPublish hook.
+  oilTradeSeries: SEED_META.oilTradeSeries.activationKey,
   // Written by scripts/seed-cross-border-arrivals.mjs in runSeed's afterPublish hook.
   crossBorderArrivals: SEED_META.crossBorderArrivals.activationKey,
+  // Written by scripts/seed-capital-flows.mjs in runSeed's afterPublish hook.
+  capitalFlows: SEED_META.capitalFlows.activationKey,
   bocValet: 'seed-activated:economic:boc-valet',
   statcanWds: 'seed-activated:economic:statcan-wds',
   // Written by scripts/seed-live-video-resolved.mjs in runSeed's afterPublish hook.
@@ -2259,6 +2313,7 @@ const ACTIVATION_MARKERS = {
   // article index publishes with its seed-meta (#7748).
   gdeltCountryArticles: SEED_META.gdeltCountryArticles.activationKey,
   gdeltDyadTension: SEED_META.gdeltDyadTension.activationKey,
+  gdeltCountryEvents: SEED_META.gdeltCountryEvents.activationKey,
   physicalPremiums: SEED_META.physicalPremiums.activationKey,
   // Written by publishUsHtsIndex in scripts/seed-supply-chain-trade.mjs.
   usHtsDuties: SEED_META.usHtsDuties.activationKey,
@@ -2635,6 +2690,10 @@ const ZERO_RECORD_DATA_OK_KEYS = new Set([
   'sanctionsChanges',
   'forecastArchive',
   'naturalEvents',
+  // A 72h window with no corroborated strike is a quiet theater, not a failed
+  // publish: the relay writes {events: []} every healthy tick, so a MISSING
+  // canonical key still reads EMPTY.
+  'iranEvents',
   // A current List query can validly return no Posts. The relay still writes
   // the canonical snapshot, so a missing xFeed key remains a hard failure.
   'xFeed',

@@ -17,7 +17,11 @@
 //      public-facing section so downstream users of the proto API see why score
 //      values or movement semantics may shift between deploys.
 //
-// Last reviewed: 2026-06-06 (v8 — fix dead UCDP conflict-floor attribution:
+// Last reviewed: 2026-10-19 (v11 — real country borders replace bounding boxes for geo
+// events, and a sustained GDELT level joins escalation (cap 50 -> 70); v10 — GDELT
+// escalation stands in for ACLED in Conflict
+// and Unrest while ACLED is dark; v9 — news credits every country a headline names;
+// v8 — fix dead UCDP conflict-floor attribution:
 // the scorer read non-existent `intensity_level`/`type_of_violence` fields, so
 // UCDP never applied a war/minor floor and never counted toward health coverage.
 // Now classifies via the cached feed's real `violenceType`/`deathsBest`/`dateStart`
@@ -29,7 +33,7 @@
  * Bump on coefficient or scoring-contract changes so API clients can detect
  * score or movement-semantics drift.
  */
-export const CII_FORMULA_VERSION = 'v8';
+export const CII_FORMULA_VERSION = 'v11';
 
 /**
  * Conflict event activity log curve used before fatality/civilian/strike boosts.
@@ -38,6 +42,74 @@ export const CII_FORMULA_VERSION = 'v8';
  */
 export const CII_CONFLICT_ACTIVITY_CAP = 70;
 export const CII_CONFLICT_ACTIVITY_PIVOT = 4000;
+
+/**
+ * GDELT escalation terms inside Conflict and Unrest, used only while the ACLED
+ * API returns no events (WorldMonitor has no ACLED access). Input per country
+ * and signal, from gdelt:bulk:country-events:v1: `current`, the last 24h of
+ * distinct articles reporting events located there (Conflict: CAMEO 18/19/20
+ * material conflict; Unrest: CAMEO 14 protest), and `baselineMedian`, the
+ * median day of the 28 complete days before yesterday.
+ *
+ *   r = (current + K) / (baselineMedian + K)
+ *   term = r <= R0 ? 0 : min(CAP, log(r / R0) / log(RSAT / R0) * CAP)
+ *
+ * Scored against each country's OWN norm because GDELT volume is mostly media
+ * volume: the US files ~800 conflict-coded articles on an ordinary weekday and
+ * Ukraine ~55, so any shared absolute scale ranks the US above a war. K damps
+ * small countries (6 articles against a norm of 1 is noise, not a 6x spike);
+ * R0 absorbs the weekday news cycle, which swings large markets ~15% above
+ * their median. Calibrated on replayed Sep 10 - Oct 19 2026 exports (all
+ * Tier-1 countries, 16 days): the Oct 11-12 Riyadh strikes score 61-68 on
+ * Conflict, the week before 0, France's Oct 19 riots 70 on Unrest, and US/GB
+ * stay at 0-1 on Conflict and 0-10 on Unrest. eventMultiplier is not applied
+ * (it is reserved for verified events). A war or protest movement at its usual
+ * tempo scores 0 on escalation by design; the sustained level below reads it.
+ *
+ * CAP is shared with the level term. v10 used 50; v11 uses 70, the cap of the
+ * ACLED activity term (CII_CONFLICT_ACTIVITY_CAP) these terms stand in for.
+ * Replayed on Oct 5, 12, 14 and 19, the US, GB, China, Korea, Taiwan, Qatar and
+ * the UAE score identically under 70 and 50; the largest difference is +4
+ * (France's riots, Yemen), and Germany, Japan, Egypt and Poland move by at most
+ * 1 on single days. Under 50, Saudi Arabia never clears its advisory floor of
+ * 50, even in the strike week; under 70 it reaches 52 on Oct 12. A capped term
+ * moves the combined score by at most 12.6 (Conflict) or 10.5 (Unrest).
+ */
+export const CII_GDELT_ESCALATION_CAP = 70;
+export const CII_GDELT_ESCALATION_SMOOTHING = 20;
+export const CII_GDELT_ESCALATION_DEADBAND = 1.25;
+export const CII_GDELT_ESCALATION_SATURATION = 3;
+/** Older than this (materializer stopped), the snapshot is ignored. */
+export const CII_GDELT_ESCALATION_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Sustained GDELT level, the second half of each GDELT term (v11). A crisis
+ * that lasts weeks raises its own 28-day median, so escalation alone reads it
+ * as calm: a month of strikes on Saudi Arabia left its v10 Conflict term at 0.
+ * Input per country, from the same snapshot: `week`, the distinct articles of
+ * the seven complete days through yesterday, and how many of them were
+ * conflict-coded (CAMEO 18/19/20) and protest-coded (CAMEO 14). The level
+ * reads the SHARE, so media volume cancels out:
+ *
+ *   share = coded / articles   (0 when articles < MIN_ARTICLES)
+ *   level = min(CAP, max(0, (share - FLOOR) / (SATURATION - FLOOR)) * CAP)
+ *   term  = max(escalation, level)   (never the sum: one signal, two readings)
+ *
+ * FLOOR is the noise floor every country carries: GDELT codes US crime and
+ * policing as conflict, so the US sits at 11-13.5% every week of the Sep 10 -
+ * Oct 19 2026 replay, and protest coding runs ~1% almost everywhere. SATURATION
+ * is a country at war (Yemen 28-43%) or a nationwide protest movement (France
+ * 7.9% during the October riots). On Oct 19 (seven days through Oct 18):
+ * Yemen 39% -> 68, Saudi Arabia 29% -> 41 (14.7% -> 2 in the week before the
+ * strikes), Israel 23% -> 25, US/GB/China 0; on Unrest France 70, India 65
+ * (7.6%), Brazil 9. MIN_ARTICLES keeps small-coverage countries (Myanmar, 47
+ * articles) from scoring a share of a few dozen articles.
+ */
+export const CII_GDELT_LEVEL_MIN_ARTICLES = 200;
+export const CII_GDELT_LEVEL_CONFLICT_FLOOR = 0.14;
+export const CII_GDELT_LEVEL_CONFLICT_SATURATION = 0.40;
+export const CII_GDELT_LEVEL_PROTEST_FLOOR = 0.02;
+export const CII_GDELT_LEVEL_PROTEST_SATURATION = 0.08;
 
 /**
  * Strategic-risk top-N positional decay step. Weight for position `i` (0-based)

@@ -1,5 +1,6 @@
 import { screenSanctions } from '../../../server/_shared/sanctions-screen';
 import { projectSupplyChainData } from './_shipping-freight';
+import { CAPITAL_FLOW_PAIR_LEG_SCHEMA, CAPITAL_FLOWS_MAX_COUNTRIES, CAPITAL_FLOWS_PAIRS_LABEL, CAPITAL_FLOWS_SORTS, projectCapitalFlows, type CapitalFlowsSort } from './_capital-flows';
 import ISO2_TO_ISO3 from '../../../shared/iso2-to-iso3.js';
 import { MARKET_ASSET_CLASSES } from '../../../shared/panel-admission';
 import { normalizeSocialVelocity } from '../../_social-velocity.js';
@@ -63,6 +64,7 @@ import {
   summarizeData,
 } from '../filters';
 import { resolveCountryFilter } from '../_country-args';
+import { compareOilWindows, expandCountry } from '../../../shared/oil-trade-windows.js';
 import { RpcValidationError } from '../billing-denial';
 import type { ConflictSourceObservation, FreshnessCheck, ToolDef } from '../types';
 import { forecastCaseReadSchema, forecastPanelAdmissionSchema } from '../../../shared/panel-admission';
@@ -370,6 +372,11 @@ function normalizeStoredCredibilityScore(
   return propagandaRisk === 'high'
     ? Math.min(score, CREDIBILITY_HIGH_RISK_CAP)
     : score;
+}
+
+// Snapshots written before countryCodes existed carry only countryCode.
+function storyCountryCodes(story: Record<string, unknown>): unknown[] {
+  return Array.isArray(story.countryCodes) ? story.countryCodes : [story.countryCode];
 }
 
 function addNewsSourceProvenance(value: unknown): unknown {
@@ -1478,7 +1485,9 @@ export const CACHE_TOOLS: ToolDef[] = [
       return data;
     },
     _cacheKeys: ['aviation:delays-bootstrap:v2'],
-    _freshnessChecks: [{ key: 'seed-meta:aviation:faa', maxStaleMin: 90 }],
+    // The aggregate's own meta, as api/health.js flightDelays reads it (#6987).
+    // seed-meta:aviation:faa counts the FAA side-car only.
+    _freshnessChecks: [{ key: 'seed-meta:aviation:delays-bootstrap', maxStaleMin: 90 }],
     _apiPaths: [],
   },
   {
@@ -1539,6 +1548,7 @@ export const CACHE_TOOLS: ToolDef[] = [
             } },
             category: { type: 'string' }, threatLevel: { type: 'string' },
             countryCode: { type: ['string', 'null'] }, isAlert: { type: 'boolean' },
+            countryCodes: { type: 'array', items: { type: 'string' }, description: 'Every country named in the headline, primary (countryCode) first. The country filter matches any of them.' },
             sourceProvenance: {
               type: 'object',
               properties: {
@@ -1601,7 +1611,7 @@ export const CACHE_TOOLS: ToolDef[] = [
       if (topic) narrowNested(data, 'gdelt-intel', 'topics', (t) => argStr(t.id) === topic);
       if (category) narrowNested(data, 'insights', 'topStories', (s) => argStr(s.category) === category);
       if (countries.length > 0) {
-        narrowNested(data, 'insights', 'topStories', (s) => matchesCode(s.countryCode, countries));
+        narrowNested(data, 'insights', 'topStories', (s) => storyCountryCodes(s).some((code) => matchesCode(code, countries)));
         narrowNested(data, 'advisories-bootstrap', 'advisories', (a) => matchesCode(a.country, countries));
       }
       if (argBool(params.alerts_only)) narrowNested(data, 'insights', 'topStories', (s) => s.isAlert === true);
@@ -2347,12 +2357,12 @@ export const CACHE_TOOLS: ToolDef[] = [
     title: 'Sanctions lists and pressure scores',
     _subscriptionOnly: true,
     _outputBudgetBytes: 131072,
-    description: 'Screen OFAC SDN, OFAC Consolidated and Canada SEMA entities, or read country pressure and designation changes. screen matches names, up to 10 aliases and exact IMO IDs, returning score/matched_on/matched_text; query filters primary names. changes_since_days (1-90) selects history only, paged by changes_cursor, max 100 events/page. Gaps include held diffs above 5% removals; history keeps 90 days/10,000 events (truncatedBefore marks cap loss). Seeded every 6 hours, stale after 12 hours; no live fetch. Subscription required, weight 1. Matches are leads to confirm with the issuing agency, not legal advice.',
+    description: 'Screen OFAC SDN, OFAC Consolidated, Canada SEMA and six US Consolidated Screening List export-control lists (BIS Entity, Denied Persons, Unverified, Military End User; State ITAR debarred, nonproliferation), or read country pressure and designation changes. Pressure counts OFAC and SEMA only; CSL rows have et unspecified, and their events carry notice (Federal Register citation) and url. screen matches names, up to 10 aliases and exact IMO IDs, returning score/matched_on/matched_text; query filters primary names. changes_since_days (1-90) selects history only, paged by changes_cursor, max 100 events/page. Gaps include held diffs above 5% removals; history keeps 90 days/10,000 events (truncatedBefore marks cap loss). Seeded every 6 hours, stale after 12 hours; no live fetch. Subscription required, weight 1. Matches are leads to confirm with the issuing agency, not legal advice.',
     inputSchema: {
       type: 'object',
       properties: {
         country: { type: 'string', description: 'Filter sanctioned entities and pressure scores to one ISO 3166-1 alpha-2 country code. Country names and alpha-3 codes are accepted; unresolved inputs return Invalid params.' },
-        entity_type: { type: 'string', description: 'Filter to one entity type (case-insensitive substring, e.g. "vessel", "aircraft", "person", "entity").' },
+        entity_type: { type: 'string', description: 'Filter to one entity type (case-insensitive substring, e.g. "vessel", "aircraft", "individual", "entity"; CSL rows are "unspecified").' },
         query: { type: 'string', description: 'Keep only sanctioned entities whose name contains this text (case-insensitive).' },
         screen: { type: 'string', minLength: 2, maxLength: 200, description: 'Screen a name, alias or IMO identifier against the seeded lists (2-200 characters). Omit changes_since_days for entity screening.' },
         min_score: { type: 'number', minimum: 0, maximum: 100, default: 70, description: 'Minimum screening score from 0 to 100 (default 70); applies only with screen.' },
@@ -2400,6 +2410,8 @@ export const CACHE_TOOLS: ToolDef[] = [
             list: { type: 'string' }, id: { type: 'string' }, name: { type: 'string' }, et: { type: 'string' },
             cc: { type: 'array', items: { type: 'string' } }, pr: { type: 'array', items: { type: 'string' } },
             prevPr: { type: 'array', items: { type: 'string' } },
+            notice: { type: 'string', description: 'Federal Register citation (CSL lists only).' },
+            url: { type: 'string', description: 'Issuing list page (CSL lists only).' },
           } } },
           gaps: { type: 'array', items: { type: 'object', properties: {
             list: { type: 'string' }, from: { type: 'number' }, to: { type: 'number' },
@@ -2961,6 +2973,97 @@ export const CACHE_TOOLS: ToolDef[] = [
     ],
   },
   {
+    name: 'get_oil_trade_series',
+    title: 'Oil production and export series by country',
+    _outputBudgetBytes: 131072,
+    description: 'Monthly oil supply and export series for 24 major exporters over 24 complete months, comparing the last N complete months with the N before and a year earlier (default N=6), e.g. UAE oil exports, last 6 months vs the 6 before. Four sources, never blended: production (EIA STEO liquids supply, revisable estimates); jodi (the country\'s own JODI crude and product exports; the UAE has filed none since 2019); mirror (Comtrade imports declared by buyers, a lagging sample compared only on buyers in basis.reporters); ais (PortWatch tanker loadings, an index that undercounts, not an export total). Uncovered months are null, never zero; each source has status and lastObserved. Weekly seed, stale after 14 days. Seeded-cache read: weight 1 on API plans, included in the signed-in free allowance. country adds monthly rows; window_months sets N (1-12).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        country: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Countries as ISO alpha-2, alpha-3 or English names (e.g. ["AE"], ["Saudi Arabia"]). Selected countries include their monthly rows. Omit for every covered country, comparison only. Unresolved inputs return Invalid params; a resolvable country outside the 24 covered returns no row.',
+        },
+        window_months: {
+          type: 'integer', minimum: 1, maximum: 12,
+          description: 'Months per comparison window, ending at the last complete month (default 6: the last 6 complete months vs the 6 before, plus the same 6 months a year earlier).',
+        },
+      },
+      required: [],
+    },
+    outputSchema: cacheEnvelope({
+      oilTradeSeries: {
+        type: ['object', 'null'],
+        properties: {
+          generatedAt: { type: 'string', description: 'Seed time.' },
+          throughMonth: { type: 'string', description: 'Last complete month at seed time.' },
+          windowMonths: { type: 'integer' },
+          conversion: { type: 'object', properties: { crudeBblPerTonne: { type: 'number' }, productsBblPerTonne: { type: 'number' } } },
+          unavailable: { type: 'object', description: 'Countries whose mirror or ais fetch failed at seed time. Unavailable, not zero.', properties: {
+            mirror: { type: 'array', items: { type: 'string' } }, ais: { type: 'array', items: { type: 'string' } },
+          } },
+          countries: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                iso2: { type: 'string' }, iso3: { type: 'string' }, name: { type: 'string' },
+                sources: { type: 'object', description: 'Per source: name, url, measure, status (ok, stale, not_reported, unavailable), lastObserved month. carriedForward marks an unavailable source still showing its previous publish\'s months.' },
+                comparison: {
+                  type: 'object',
+                  properties: {
+                    windowMonths: { type: 'integer' },
+                    windows: { type: 'object', description: 'current, prior and yearAgo as {from, to} months.' },
+                    metrics: {
+                      type: 'object',
+                      description: 'production, jodiCrudeExports, jodiProductExports, mirrorCrudeImports, mirrorProductImports, aisTankerLoadings. Each: current/prior/yearAgo {kbd, monthsCovered} day-weighted over covered months (kbd null when none), changePct vs prior, yoyPct (currentForYoy vs yearAgo; for mirror metrics on basis.yoyReporters), complete (both windows fully covered), and for mirror metrics basis.reporters.',
+                    },
+                  },
+                },
+                months: {
+                  type: 'array',
+                  description: 'Present only for selected countries. One row per month; a source block is null for a month it does not cover.',
+                  items: { type: 'object', properties: {
+                    month: { type: 'string' },
+                    production: { type: ['object', 'null'], properties: { kbd: { type: 'number' }, provisional: { type: 'boolean' } } },
+                    jodi: { type: ['object', 'null'], properties: { crudeExportsKbd: { type: ['number', 'null'] }, productExportsKbd: { type: ['number', 'null'] }, crudeProductionKbd: { type: ['number', 'null'] } } },
+                    mirror: { type: ['object', 'null'], properties: { crudeKbd: { type: ['number', 'null'] }, productsKbd: { type: ['number', 'null'] }, reporters: { type: 'object' }, otherKbd: { type: ['object', 'null'] } } },
+                    ais: { type: ['object', 'null'], properties: { complete: { type: 'boolean' }, loadingsKbd: { type: ['number', 'null'] }, exportTankerKt: { type: ['number', 'null'] }, tankerCalls: { type: ['number', 'null'] } } },
+                  } },
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    _cacheKeys: ['energy:oil-trade-series:v1'],
+    _cacheLabels: { 'energy:oil-trade-series:v1': 'oilTradeSeries' },
+    _freshnessChecks: [{ key: 'seed-meta:energy:oil-trade-series', maxStaleMin: 20160, minRecordCount: 18, honorContentAge: true }],
+    _apiPaths: [],
+    _postFilter: (data, params) => {
+      const payload = data.oilTradeSeries;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return data;
+      const stored = (payload as { countries?: unknown }).countries;
+      if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return data;
+      const selected = resolveCountryFilter(params.country, 'country').map((code) => code.toUpperCase());
+      const rawWindow = argNum(params.window_months);
+      const windowMonths = rawWindow !== null && Number.isInteger(rawWindow) && rawWindow >= 1 && rawWindow <= 12 ? rawWindow : 6;
+      const nowMs = Date.now();
+      const countries = Object.values(stored as Record<string, Record<string, unknown>>)
+        .filter((c) => selected.length === 0 || selected.includes(String(c?.iso2)))
+        .map((c) => {
+          const expanded = expandCountry(c);
+          const { months, from: _from, to: _to, ...rest } = expanded;
+          const comparison = compareOilWindows(expanded, { nowMs, windowMonths });
+          return selected.length > 0 ? { ...rest, comparison, months } : { ...rest, comparison };
+        });
+      return { ...data, oilTradeSeries: { ...payload, windowMonths, countries } };
+    },
+  },
+  {
     name: 'get_climate_data',
     _validateArgs: params => { resolveCountryFilter(params.country, 'country'); },
     title: 'Climate anomalies and disasters',
@@ -3395,6 +3498,141 @@ export const CACHE_TOOLS: ToolDef[] = [
       "GET /api/economic/v1/get-fao-food-price-index",
       "GET /api/economic/v1/get-national-debt",
       "GET /api/economic/v1/list-bigmac-prices",
+    ],
+  },
+  {
+    name: 'get_capital_flows',
+    title: 'Cross-country capital flows',
+    _outputBudgetBytes: 131072,
+    description: 'Return where money enters and leaves about 230 economies, and between any two, from official statistics. IMF balance of payments: gross inflows and outflows split into FDI, portfolio and other investment, quarterly or annual by country, with derived Forbes-Warnock states (surge or stop for inflows, flight or retrenchment for outflows) and z-scores. Per country and per pair: BIS cross-border bank deposits and lending, IMF portfolio holdings and IMF direct-investment positions. People changing residence are not a BOP flow. Sources lag 1-3 quarters (FDI ~2 years); stale after 10 days or when the newest BOP quarter is over a year old. Seeded-cache read: weight 1 on API plans, included in the signed-in free allowance. country (max 10) returns full views; counterpart adds both directions of each pair, each leg marked reported, not_itemized or not_published. Without country, a ranking of countries that have the sort metric (default outflow_z; annual-only series have none) capped by limit (default 30, 0 for no cap).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        country: {
+          type: 'array',
+          items: { type: 'string' },
+          maxItems: CAPITAL_FLOWS_MAX_COUNTRIES,
+          description: 'Countries to return in full: ISO 3166-1 alpha-2 (e.g. "GB"), alpha-3 ("ARE") or English names. Omit to get the cross-country ranking.',
+        },
+        include_series: { type: 'boolean', description: 'With country, also return the period-by-period BOP flows (12 quarters or 6 years). Default false.' },
+        counterpart: {
+          type: 'string',
+          description: 'With country, a partner country (alpha-2, alpha-3 or name). Returns pairs[]: deposits each side\'s non-banks hold in the other\'s banks and bank lending each way (stock, 4-quarter flow, 8 quarters of history), each side\'s holdings of the other\'s securities, and direct investment each way with both sides\' figures, plus the counterpart\'s own view.',
+        },
+        sort: {
+          type: 'string',
+          enum: [...CAPITAL_FLOWS_SORTS],
+          description: 'Ranking field when country is omitted. outflow_z / inflow_z rank the latest Forbes-Warnock z-score; *_pct_gdp rank trailing gross flows as a share of GDP; net_usd_bn ranks inflows minus outflows; bank_deposits_abroad_flow_4q ranks the 4-quarter change in non-bank deposits held in foreign banks; foreign_portfolio_change_pct ranks the year-on-year change in foreign holdings of the country\'s securities. Default outflow_z.',
+        },
+        ascending: { type: 'boolean', description: 'Sort ascending instead of descending. Default false.' },
+        limit: { type: 'number', description: 'Cap the ranking to this many countries (default 30, pass 0 for no cap). Ignored with country.' },
+      },
+      required: [],
+    },
+    outputSchema: cacheEnvelope({
+      'capital-flows': {
+        type: ['object', 'null'],
+        properties: {
+          latest: { type: ['object', 'null'], properties: {
+            bopQuarter: { type: ['string', 'null'] }, bopNewestQuarter: { type: ['string', 'null'] }, bopYear: { type: ['string', 'null'] },
+            bisQuarter: { type: ['string', 'null'] }, pipYear: { type: ['number', 'null'] }, fdiYear: { type: ['number', 'null'] },
+          } },
+          coverage: { type: ['object', 'null'] },
+          units: { type: 'string' },
+          method: { type: ['object', 'null'], description: 'Method notes per view, including the caveat that wealth migration is not a BOP flow.' },
+          seededAt: { type: ['string', 'null'] },
+          countries: {
+            type: 'object',
+            description: 'Present when country is given. Keyed by alpha-2; null when the country has no data.',
+            additionalProperties: { type: ['object', 'null'], properties: {
+              iso2: { type: 'string' }, iso3: { type: ['string', 'null'] }, gdpUsdBn: { type: ['number', 'null'] },
+              bop: { type: ['object', 'null'], description: 'frequency quarterly carries state, episodes and trailing4q; annual carries latestYear and no episodes.' },
+              bank: { type: ['object', 'null'] },
+              portfolio: { type: ['object', 'null'] },
+              fdi: { type: ['object', 'null'], description: 'IMF direct-investment positions as the country reports them, by immediate counterpart.' },
+            } },
+          },
+          pairs: {
+            type: 'array',
+            description: 'Present with counterpart: one entry per country (a) against the counterpart (b); null when the pair matrices are unavailable or from a different seed run.',
+            items: {
+              type: ['object', 'null'],
+              properties: {
+                country: { type: 'string' }, counterpart: { type: 'string' },
+                bankPeriod: { type: 'string' }, portfolioYear: { type: 'integer' },
+                aDepositsInB: CAPITAL_FLOW_PAIR_LEG_SCHEMA, bDepositsInA: CAPITAL_FLOW_PAIR_LEG_SCHEMA,
+                aBorrowingFromB: CAPITAL_FLOW_PAIR_LEG_SCHEMA, bBorrowingFromA: CAPITAL_FLOW_PAIR_LEG_SCHEMA,
+                aHoldingsOfB: CAPITAL_FLOW_PAIR_LEG_SCHEMA, bHoldingsOfA: CAPITAL_FLOW_PAIR_LEG_SCHEMA,
+                aFdiInB: CAPITAL_FLOW_PAIR_LEG_SCHEMA, bFdiInA: CAPITAL_FLOW_PAIR_LEG_SCHEMA,
+                fdiYear: { type: 'integer' },
+              },
+              required: ['country', 'counterpart', 'aDepositsInB', 'bDepositsInA', 'aBorrowingFromB', 'bBorrowingFromA', 'aHoldingsOfB', 'bHoldingsOfA', 'aFdiInB', 'bFdiInA'],
+            },
+          },
+          sort: { type: 'string', enum: [...CAPITAL_FLOWS_SORTS] },
+          order: { type: 'string', enum: ['ascending', 'descending'] },
+          rankedCount: { type: 'integer', description: 'Countries with a value for the sort field, before limit.' },
+          ranking: {
+            type: 'array',
+            description: 'Present when country is omitted.',
+            items: {
+              type: 'object',
+              properties: {
+                country: { type: 'string' },
+                frequency: { type: ['string', 'null'], enum: ['quarterly', 'annual', null] },
+                latestPeriod: { type: ['string', 'null'] },
+                inflowState: { type: ['string', 'null'], enum: ['surge', 'stop', null] },
+                outflowState: { type: ['string', 'null'], enum: ['flight', 'retrenchment', null] },
+                inflowZ: { type: ['number', 'null'] }, outflowZ: { type: ['number', 'null'] },
+                inflowsUsdBn: { type: ['number', 'null'] }, outflowsUsdBn: { type: ['number', 'null'] }, netUsdBn: { type: ['number', 'null'] },
+                inflowsPctGdp: { type: ['number', 'null'] }, outflowsPctGdp: { type: ['number', 'null'] },
+                bankDepositsAbroadFlow4qUsdBn: { type: ['number', 'null'] },
+                foreignPortfolioChangePct: { type: ['number', 'null'] },
+              },
+              required: ['country', 'frequency', 'latestPeriod', 'inflowState', 'outflowState', 'inflowZ', 'outflowZ'],
+            },
+          },
+        },
+      },
+    }),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    _postFilter: (data, params) => {
+      const countries = resolveCountryFilter(params.country, 'country');
+      if (countries.length > CAPITAL_FLOWS_MAX_COUNTRIES) {
+        throw new RpcValidationError('get_capital_flows', [{ field: 'country', description: `Pass at most ${CAPITAL_FLOWS_MAX_COUNTRIES} countries.` }]);
+      }
+      const sortArg = typeof params.sort === 'string' && params.sort ? params.sort : 'outflow_z';
+      if (!(CAPITAL_FLOWS_SORTS as readonly string[]).includes(sortArg)) {
+        throw new RpcValidationError('get_capital_flows', [{ field: 'sort', description: `Choose one of ${CAPITAL_FLOWS_SORTS.join(', ')}.` }]);
+      }
+      const counterpart = resolveCountryFilter(params.counterpart, 'counterpart');
+      if (counterpart.length > 0 && countries.length === 0) {
+        throw new RpcValidationError('get_capital_flows', [{ field: 'counterpart', description: 'counterpart needs at least one country.' }]);
+      }
+      if (counterpart.length > 1) {
+        throw new RpcValidationError('get_capital_flows', [{ field: 'counterpart', description: 'Pass one counterpart.' }]);
+      }
+      return projectCapitalFlows(data, {
+        countries,
+        counterpart: counterpart[0],
+        includeSeries: argBool(params.include_series),
+        sort: sortArg as CapitalFlowsSort,
+        ascending: argBool(params.ascending),
+        // 0 = no cap; a negative limit falls back to the default rather than uncapping.
+        limit: (() => { const n = argNum(params.limit); return n == null || n < 0 ? DEFAULT_LIST_LIMIT : Math.floor(n); })(),
+      });
+    },
+    // The pair matrices (~280 KB) are written by the same seeder run; the
+    // projection drops them unless a counterpart is asked for.
+    _cacheKeys: ['economic:capital-flows:v1', 'economic:capital-flows:pairs:v1'], // STANDALONE_KEYS::capitalFlows
+    _cacheLabels: { 'economic:capital-flows:pairs:v1': CAPITAL_FLOWS_PAIRS_LABEL },
+    _freshnessChecks: [
+      // Weekly macro-bundle seed; 10d matches api/health.js SEED_META.capitalFlows.
+      // honorContentAge: a frozen IMF BOP feed (newest quarter > 12 months) flags stale.
+      { key: 'seed-meta:economic:capital-flows', maxStaleMin: 14400, honorContentAge: true },
+    ],
+    _apiPaths: [
+      "GET /api/economic/v1/get-capital-flows",
     ],
   },
   {

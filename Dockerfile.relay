@@ -72,6 +72,15 @@ COPY scripts/lib/publisher-link-relay-gate.cjs ./scripts/lib/publisher-link-rela
 COPY scripts/lib/classify-digest-request.cjs ./scripts/lib/classify-digest-request.cjs
 COPY scripts/lib/saudi-civil-defense-alerts.cjs ./scripts/lib/saudi-civil-defense-alerts.cjs
 COPY scripts/lib/chokepoint-disruption-alerts.cjs ./scripts/lib/chokepoint-disruption-alerts.cjs
+# Middle East strike feed (conflict:iran-events:v1), required at relay startup;
+# the gazetteer reads outbreak-places.json at require time. The GDELT backstop
+# lazily imports _conflict-gdelt-bulk.mjs and its two helpers below.
+COPY scripts/lib/middle-east-strikes.cjs ./scripts/lib/middle-east-strikes.cjs
+COPY scripts/lib/middle-east-strikes-gazetteer.cjs ./scripts/lib/middle-east-strikes-gazetteer.cjs
+COPY scripts/data/outbreak-places.json ./scripts/data/outbreak-places.json
+COPY scripts/_conflict-gdelt-bulk.mjs ./scripts/_conflict-gdelt-bulk.mjs
+COPY scripts/_conflict-gdelt.mjs ./scripts/_conflict-gdelt.mjs
+COPY scripts/_gdelt-country-codes.mjs ./scripts/_gdelt-country-codes.mjs
 # Jev shadow observer required by ais-relay.cjs; its shared/jev-classify.js
 # half ships with the `COPY shared/` below.
 COPY scripts/lib/jev-classify-relay.cjs ./scripts/lib/jev-classify-relay.cjs
@@ -79,6 +88,9 @@ COPY scripts/shared/country-name-to-iso2.cjs ./scripts/shared/country-name-to-is
 # country-names.json backs the full name→ISO2 map (#5359 uniform country
 # scoping); required by country-name-to-iso2.cjs at startup.
 COPY scripts/shared/country-names.json ./scripts/shared/country-names.json
+# news-places.json maps city/region names to ISO2 for the classify threat
+# summary (threatSummaryCountries); required by ais-relay.cjs at startup.
+COPY scripts/shared/news-places.json ./scripts/shared/news-places.json
 # iso3-to-iso2.json maps WMO SWIC member `code` (ISO 3166-1 alpha-3) onto the
 # weather_alert countryCode. scripts/_weather-alert-select.mjs reads it at
 # import time; missing it is ERR_MODULE_NOT_FOUND / ENOENT at relay start.

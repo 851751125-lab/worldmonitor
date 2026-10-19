@@ -42,7 +42,7 @@ The core of the geopolitical variant: who is fighting, protesting, fleeing, and 
 - Israel Home Front Command (OREF) rocket and drone sirens in real time
 - Prediction-market probabilities as leading indicators (Polymarket)
 - Geopolitical boundary overlays — Korean DMZ (43-point closed-ring polygon based on the Korean Armistice Agreement), with typed boundary categories (demilitarized, ceasefire, disputed, armistice) and info popups
-- Iran conflict events — geocoded attacks, strikes, and military incidents sourced from LiveUAMap with severity classification
+- Middle East strikes — missile, drone and air strikes and interceptions in Saudi Arabia, Yemen, Iran, Iraq, the Gulf states and the Levant, extracted from curated Telegram channels (keyword pre-filter, then an AI classifier) and backstopped by the GDELT event export; reports from belligerent state media publish only when an independent source agrees
 
 **Key providers**
 
@@ -198,7 +198,6 @@ Force posture and strategic infrastructure, tracked from open sources in real ti
 |----------|------|------|
 | CelesTrak | Satellite TLE data for orbital tracking | [celestrak.org](https://celestrak.org) |
 | gpsjam.org | ADS-B-derived GPS interference grid | [gpsjam.org](https://gpsjam.org) |
-| LiveUAMap | Geocoded conflict events (Iran theater) | [liveuamap.com](https://liveuamap.com) |
 | World Bank Open Data | Military expenditure, personnel, and national arms-transfer totals (`MS.MIL.*`) | [api.worldbank.org](https://api.worldbank.org/) |
 | SIPRI Arms Transfers Database | Derived supplier shares and HHI for delivered major conventional weapons; no full-database mirror | [armstransfers.sipri.org](https://armstransfers.sipri.org/) |
 
@@ -653,7 +652,9 @@ Airports across the Americas, Europe, Asia-Pacific, MENA, and Africa are continu
 
 **NOTAM closure detection** targets MENA airports where airspace closures due to military activity or security events carry strategic significance. Detection uses two methods: ICAO Q-code matching (aerodrome/airspace closure codes `FA`, `AH`, `AL`, `AW`, `AC`, `AM` combined with closure qualifiers `LC`, `AS`, `AU`, `XX`, `AW`) and free-text regex scanning for closure keywords (`AD CLSD`, `AIRPORT CLOSED`, `AIRSPACE CLOSED`). When a NOTAM closure is detected, it overrides any existing delay alert for that airport with a `severe/closure` classification.
 
-**Severity thresholds**: Average delay ≥15min or ≥15% delayed flights = minor; ≥30min/30% = moderate; ≥45min/45% = major; ≥60min/60% = severe. Cancellation rate ≥80% with ≥10 flights = closure. All results are cached for 30 minutes in Redis. When no AviationStack API key is configured, the system generates probabilistic simulated delays for demonstration — rush-hour windows and high-traffic airports receive higher delay probability.
+Only a JSON array from ICAO counts as a NOTAM observation, and an empty array is a valid "no closures" result. An HTTP error, an HTML page, malformed or non-array JSON, a timeout, or ICAO's `Reach call limit` quota response leaves `seed-meta:aviation:notam` untouched. The seeder keeps renewing the last closure list while it is within the 240-minute `notamClosures` health budget. After that, `/api/health` reports the feed stale, the seeder stops renewing the list, and it expires at its 2-hour TTL instead of being shown as current.
+
+**Severity thresholds**: Average delay ≥15min or ≥15% delayed flights = minor; ≥30min/30% = moderate; ≥45min/45% = major; ≥60min/60% = severe. Cancellation rate ≥80% with ≥10 flights = closure. AviationStack rates are measured over flights already due (scheduled departure passed, or departed) when at least 10 are in the sample, and over every returned flight otherwise, so advance cancellations of later flights cannot read as a closure on their own. All results are cached for 30 minutes in Redis. When no AviationStack API key is configured, the system generates probabilistic simulated delays for demonstration — rush-hour windows and high-traffic airports receive higher delay probability.
 
 ### Aviation Intelligence Panel
 
