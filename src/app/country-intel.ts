@@ -633,7 +633,7 @@ export class CountryIntelManager implements AppModule {
         }
 
         const groundingNews = filteredNews.slice(0, 15);
-        let briefSources = collectBriefSources(groundingNews, 6);
+        const briefSources = collectBriefSources(groundingNews, 6);
         const headlines = groundingNews.map((n) => n.title);
         if (headlines.length) context.headlines = headlines;
         if (briefSources.length) context.briefSources = briefSources;
@@ -687,9 +687,6 @@ export class CountryIntelManager implements AppModule {
           briefResult = await this.fetchCountryIntelBrief(code, contextSnapshot, countryFw?.systemPromptAppend ?? '');
           if (token !== this.briefRequestToken || this.ctx.countryBriefPage?.getCode() !== code) return;
           briefText = briefResult.brief;
-          if (briefResult.sources.length > 0) {
-            briefSources = briefResult.sources;
-          }
         } catch { /* server unreachable */ }
 
         if (briefText) {
@@ -697,7 +694,7 @@ export class CountryIntelManager implements AppModule {
             brief: briefText,
             country,
             code,
-            sources: briefSources,
+            sources: briefResult?.sources ?? [],
             evidence: briefResult?.evidence,
             generatedAt: briefResult?.generatedAt,
             cached: briefResult?.cached,
@@ -869,12 +866,12 @@ export class CountryIntelManager implements AppModule {
     const lang = getCurrentLanguage();
     const params = new URLSearchParams({ country_code: code, lang });
     const trimmed = contextSnapshot.trim();
-    if (trimmed.length > 0) {
-      // 3800 chars ≈ ~950 tokens; raised from 2200 to include infra context. Monitor p95 LLM latency if timeouts increase.
+    const effectiveFramework = framework.slice(0, 2000);
+    if (effectiveFramework && trimmed.length > 0) {
       params.set('context', trimmed.slice(0, 3800));
     }
-    if (framework) {
-      params.set('framework', framework.slice(0, 2000));
+    if (effectiveFramework) {
+      params.set('framework', effectiveFramework);
     }
 
     const resp = await premiumFetch(toApiUrl(`/api/intelligence/v1/get-country-intel-brief?${params.toString()}`), {
