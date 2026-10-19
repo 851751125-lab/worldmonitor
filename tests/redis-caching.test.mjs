@@ -4119,6 +4119,75 @@ describe('military flights bbox behavior', { concurrency: 1 }, () => {
     }
   });
 
+  // Country flight pages never call a provider. During a regional seeder tick
+  // they rely on the global stale snapshot the producer now keeps in place.
+  it('serves an out-of-region country page from the global stale snapshot while live is regional', async () => {
+    const { module, cleanup } = await importListMilitaryFlights();
+    const restoreEnv = withEnv({
+      UPSTASH_REDIS_REST_URL: 'https://redis.test',
+      UPSTASH_REDIS_REST_TOKEN: 'token',
+      LOCAL_API_MODE: undefined,
+      WS_RELAY_URL: 'wss://relay.test',
+      VERCEL_ENV: undefined,
+      VERCEL_GIT_COMMIT_SHA: undefined,
+    });
+    const originalFetch = globalThis.fetch;
+    const store = new Map();
+    const staleFor = (coverage) => JSON.stringify({
+      flights: [{ id: 'americas', callsign: 'RCH501', lat: 40.5, lon: -99.5 }],
+      coverage,
+      fetchedAt: Date.now() - 600_000,
+    });
+    let staleCoverage = 'global';
+
+    globalThis.fetch = async (url, init) => {
+      const raw = String(url);
+      if (raw.includes('/get/')) {
+        const key = decodeURIComponent(raw.split('/get/')[1] || '');
+        if (key === 'military:flights:v1') {
+          return jsonResponse({
+            result: JSON.stringify({
+              flights: [{ id: 'inregion', callsign: 'RCH301', lat: 20.2, lon: 10.2 }],
+              coverage: 'regional',
+              fetchedAt: Date.now(),
+            }),
+          });
+        }
+        if (key === 'military:flights:stale:v1') return jsonResponse({ result: staleFor(staleCoverage) });
+        return jsonResponse({ result: store.get(key) ?? null });
+      }
+      if (isSetRequest(url, init)) return applySetToStore(store, url, init);
+      throw new Error(`Unexpected fetch URL: ${raw}`);
+    };
+
+    const policy = { redistributableOnly: false, allowProviderFetch: false };
+    try {
+      const result = await module.readMilitaryFlights(
+        { request: new Request('https://wm.test/api/intelligence/v1/get-country-signal-observations') },
+        americasRequest,
+        policy,
+      );
+      assert.deepEqual(result.flights.map((f) => f.id), ['americas']);
+
+      // The 2026-10-19 failure: a regional stale snapshot leaves the page nothing.
+      module._resetStaleNegativeCacheForTests();
+      store.clear();
+      staleCoverage = 'regional';
+      await assert.rejects(
+        module.readMilitaryFlights(
+          { request: new Request('https://wm.test/api/intelligence/v1/get-country-signal-observations') },
+          americasRequest,
+          policy,
+        ),
+        /snapshot unavailable/,
+      );
+    } finally {
+      cleanup();
+      globalThis.fetch = originalFetch;
+      restoreEnv();
+    }
+  });
+
   // Elie's decision: an emergency squawk (7500/7600/7700) does not remove a
   // military aircraft from the military layer, whether it arrives in the seed
   // snapshot or only from OpenSky recovery.
