@@ -26,7 +26,7 @@ import {
   type WaitUntilCtx,
 } from '../../server/_shared/usage';
 import type { AuthKind } from '../../server/_shared/usage-identity';
-import { RETIRED_TOOLS, TOOL_REGISTRY } from './registry/index';
+import { TOOL_ALIASES } from './registry/index';
 import type { McpAuthContext } from './types';
 
 // Which stage of the /mcp funnel produced the terminal Response. Set by the
@@ -47,14 +47,7 @@ export type McpPhase =
   | 'migration'  // a product-host alias was refused before auth or dispatch
   | 'ok';        // served (JSON-RPC-level errors still ride HTTP 200 → ok)
 
-/**
- * Registry name lookup — cardinality bound for tool_name (#8403). Retired
- * names stay recorded so their remaining callers show up in Axiom before the
- * alias is removed.
- */
-const REGISTERED_TOOL_NAMES: ReadonlySet<string> = new Set(
-  [...TOOL_REGISTRY, ...RETIRED_TOOLS].map((tool) => tool.name),
-);
+const REGISTERED_TOOL_NAMES: ReadonlySet<string> = TOOL_ALIASES.callableNames();
 
 /**
  * JSON-RPC methods this transport serves — cardinality bound for rpc_method
@@ -89,7 +82,7 @@ export interface McpUsage {
   skip: boolean;
   /** Served JSON-RPC method, or `_unregistered` / null (#8403 cardinality). */
   rpcMethod: string | null;
-  /** tools/call name when it matches TOOL_REGISTRY; never raw client input (#8403). */
+  /** tools/call name when it is callable (registry, alias, or retired); never raw client input (#8403). */
   toolName: string | null;
 }
 
@@ -105,15 +98,6 @@ export function createMcpUsage(): McpUsage {
   };
 }
 
-/**
- * Record the JSON-RPC method (and, for tools/call, a registry-bounded tool
- * name) on the usage accumulator. Call once the envelope has been parsed —
- * before auth branches that may return early — so Axiom can distinguish
- * initialize / tools/list / tools/call without joining anything (#8403).
- *
- * Both fields are cardinality-bounded: methods outside SERVED_RPC_METHODS map
- * to `_unregistered`; tool names outside TOOL_REGISTRY stay null.
- */
 export function setUsageRpc(
   usage: McpUsage,
   method: string,
