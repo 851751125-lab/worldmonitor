@@ -4930,6 +4930,7 @@ const THREAT_COUNTRY_NAME_TO_ISO2 = {
   'tel aviv':'IL','gaza':'PS','damascus':'SY','sanaa':'YE','houthi':'YE',
   'kremlin':'RU','pentagon':'US','nato':'','irgc':'IR','hezbollah':'LB',
   'hamas':'PS','taliban':'AF','riyadh':'SA','ankara':'TR',
+  'saudi':'SA','houthis':'YE',
 };
 // Sort by name length desc so longer multi-word names match first (used for tie-breaking same position)
 const THREAT_COUNTRY_NAME_ENTRIES = Object.entries(THREAT_COUNTRY_NAME_TO_ISO2)
@@ -4959,6 +4960,62 @@ function matchCountryNamesInText(text) {
   }
   return [];
 }
+
+// City and region names -> ISO2 (scripts/build-news-places.mjs), longest phrase first.
+const NEWS_PLACES = require('./shared/news-places.json');
+const NEWS_PLACE_MAX_WORDS = 4;
+// Mirrors stripPublisherSuffix in scripts/shared/geo-extract.mjs.
+const THREAT_PUBLISHER_CREDIT_WORDS = /\b(?:post|times|news|journal|herald|tribune|guardian|telegraph|gazette|press|reuters|bloomberg|jazeera|bbc|cnn|nbc|cbs|npr|afp|tv|television|radio|daily|weekly|observer|independent|monitor|chronicle|express|mail|standard|insider|magazine|media|network|wire|agency|today|online)\b|\.(?:com|org|net|gov)\b/i;
+const THREAT_CREDIT_TAIL_CHARS = 120;
+// Every country a lowercased, diacritic-free text names. Place phrases resolve first and are
+// blanked, so "new mexico" is US, not MX; country names are then blanked as they match, so
+// "sudan" cannot also fire inside "south sudan".
+function countriesNamedInText(lower) {
+  const tokens = [...lower.matchAll(/[a-z]+/g)];
+  const found = [];
+  let rest = lower;
+  for (let i = 0; i < tokens.length; i++) {
+    for (let n = Math.min(NEWS_PLACE_MAX_WORDS, tokens.length - i); n >= 1; n--) {
+      const iso2 = NEWS_PLACES[tokens.slice(i, i + n).map((t) => t[0]).join(' ')];
+      if (!iso2) continue;
+      if (!found.includes(iso2)) found.push(iso2);
+      const end = tokens[i + n - 1].index + tokens[i + n - 1][0].length;
+      rest = rest.slice(0, tokens[i].index) + ' '.repeat(end - tokens[i].index) + rest.slice(end);
+      i += n - 1;
+      break;
+    }
+  }
+  for (const { iso2, regex } of THREAT_COUNTRY_NAME_ENTRIES) {
+    if (!regex.test(rest)) continue;
+    if (!found.includes(iso2)) found.push(iso2);
+    rest = rest.replace(new RegExp(regex.source, 'gi'), (m) => ' '.repeat(m.length));
+  }
+  return found;
+}
+
+// The threat summary feeds CII's information score, where a headline that names no
+// attack target still says something about every country it mentions: "Saudi Arabia
+// intercepts missile near Red Sea oil hub" has no target and used to count for nobody.
+// Alert routing keeps the strict single-country rule above.
+function threatSummaryCountries(text) {
+  const affected = matchCountryNamesInText(text);
+  if (affected.length > 0) return affected;
+  // Uppercase US/UK are the countries; lowercase "us" stays the pronoun.
+  let lower = text.replace(/\bU\.S\.(?:A\.)?/g, 'United States ').replace(/\bU\.K\./g, 'United Kingdom ')
+    .replace(/\bUS\b/g, 'United States').replace(/\bUK\b/g, 'United Kingdom')
+    .normalize('NFKD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  // Drop a trailing " - The Washington Post" credit so the outlet's country is not counted.
+  const tailStart = Math.max(0, lower.length - THREAT_CREDIT_TAIL_CHARS);
+  const credit = /\s[-–—|]\s+([^-–—|]+)$/.exec(lower.slice(tailStart));
+  if (credit) {
+    const tail = credit[1].trim();
+    const isCredit = tail.split(/\s+/).length <= 6
+      && (THREAT_PUBLISHER_CREDIT_WORDS.test(tail) || countriesNamedInText(tail).length === 0);
+    if (isCredit) lower = lower.slice(0, tailStart + credit.index);
+  }
+  return countriesNamedInText(lower);
+}
+
 
 // v5 (2026-04-28): bumped from v4 in lockstep with
 // server/worldmonitor/intelligence/v1/_shared.ts and
@@ -5201,7 +5258,7 @@ async function seedClassifyForVariant(variant, seenTitles) {
     if (!CLASSIFY_VALID_LEVELS.includes(level)) continue;
     if (seenTitles.has(titleArr[i])) continue;
     seenTitles.add(titleArr[i]);
-    for (const code of matchCountryNamesInText(titleArr[i])) {
+    for (const code of threatSummaryCountries(titleArr[i])) {
       if (!byCountry[code]) byCountry[code] = emptyLevel();
       byCountry[code][level]++;
     }
@@ -5241,7 +5298,7 @@ async function seedClassifyForVariant(variant, seenTitles) {
       // Attribute newly classified title to country stats (global dedup via seenTitles)
       if (!seenTitles.has(chunk[idx])) {
         seenTitles.add(chunk[idx]);
-        for (const code of matchCountryNamesInText(chunk[idx])) {
+        for (const code of threatSummaryCountries(chunk[idx])) {
           if (!byCountry[code]) byCountry[code] = emptyLevel();
           byCountry[code][level]++;
         }
