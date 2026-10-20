@@ -1,7 +1,8 @@
 # WorldMonitor — Agent Authentication (auth.md)
 
 Use API keys or OAuth 2.1 to authenticate with the WorldMonitor API and MCP server.
-This walkthrough follows the WorkOS **auth.md** spec: <https://workos.com/auth-md>.
+This walkthrough follows the WorkOS **auth.md** spec: <https://workos.com/auth-md>,
+in its pre-v0.2 `register_uri`/`claim_uri` form.
 
 Catalog reads are open; unauthenticated `initialize` on `/mcp` gets `401`.
 `get_sources` alone is credential- and daily-quota-free
@@ -31,7 +32,7 @@ Discover the authentication requirements:
    { "issuer": "https://worldmonitor.app",
      "agent_auth": {
        "skill": "https://worldmonitor.app/auth.md",
-       "identity_endpoint": "https://worldmonitor.app/oauth/register",
+       "register_uri": "https://worldmonitor.app/oauth/register",
        "claim_uri": "https://worldmonitor.app/oauth/authorize",
        "identity_types_supported": ["anonymous"],
        "anonymous": { "credential_types_supported": ["access_token"],
@@ -59,8 +60,7 @@ credentials — there is no identity or token-exchange endpoint.
 
 ## Register
 
-**RFC 7591 Dynamic Client Registration** at the `identity_endpoint`
-(pre-v0.2: `register_uri`):
+**RFC 7591 Dynamic Client Registration** at the `register_uri`:
 
 ```
 POST /oauth/register  {"client_name":"My Agent","redirect_uris":["https://claude.ai/api/mcp/auth_callback"]}
