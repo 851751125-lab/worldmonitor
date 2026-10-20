@@ -564,6 +564,10 @@ export async function dispatchToolsCall(
     else validateToolArgs(tool, p.arguments === undefined ? {} : p.arguments);
   } catch (error) {
     if (!(error instanceof RpcValidationError)) throw error;
+    if (deferredBurst) {
+      const limited = await applyPerMinuteLimit(context, corsHeaders, toolBurstPerMinute, id);
+      if (limited) return limited;
+    }
     return rpcError(id, -32602, 'Invalid params', corsHeaders, { violations: error.violations });
   }
 
