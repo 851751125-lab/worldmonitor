@@ -7,7 +7,8 @@ import ISO2_TO_ISO3 from '../../../shared/iso2-to-iso3.js';
 import { MARKET_ASSET_CLASSES } from '../../../shared/panel-admission';
 import { normalizeSocialVelocity } from '../../_social-velocity.js';
 import { projectNaturalEventsRetention } from '../../_natural-events-dashboard.js';
-import { presentNaturalDisastersPanel } from '../_natural-disasters-reuse';
+import { NATURAL_DISASTER_EVENT_LISTS, presentNaturalDisastersPanel } from '../_natural-disasters-reuse';
+import { GEO_FILTER_OUTPUT_SCHEMA, GEO_FILTER_PROPERTIES, attachGeoFilter, filterEventLists, locationPoint, locator, oldestDatedRows, parseEventFilter, pointAt, type EventList } from '../_geo-filter';
 import { CHINA_MACRO_REQUIRED_SERIES } from '../../../shared/china-macro-contract.js';
 import {
   normalizeChinaMacroObservations,
@@ -161,6 +162,11 @@ const IRAN_EVENTS_ENABLED = (process.env.IRAN_EVENTS_ENABLED ?? 'false').toLower
 const CONFLICT_EVENTS_OUTPUT_BUDGET_BYTES = 128 * 1024;
 const CONFLICT_EVENTS_DATA_BUDGET_BYTES = CONFLICT_EVENTS_OUTPUT_BUDGET_BYTES - 1024;
 const CONFLICT_EVENT_LISTS = ['ucdp-events', 'iran-events', 'events'] as const;
+const CONFLICT_EVENT_LOCATED_LISTS: EventList[] = [
+  { label: 'ucdp-events', list: 'events', locator: locator(locationPoint, 'dateStart') },
+  { label: 'iran-events', list: 'events', locator: locator(row => pointAt(row.latitude, row.longitude) ?? locationPoint(row), 'timestamp') },
+  { label: 'events', list: 'events', locator: locator(locationPoint, 'occurredAt') },
+];
 const CONFLICT_EVENTS_FRESHNESS_CHECKS: [FreshnessCheck, ...FreshnessCheck[]] = [
   { key: 'seed-meta:conflict:ucdp-events', maxStaleMin: 30 },
   { key: 'seed-meta:unrest:events', maxStaleMin: 120 },
@@ -312,6 +318,7 @@ function filterConflictEvents(data: Record<string, unknown>, params: Record<stri
   const country = argStr(params.country);
   const minFatal = argNum(params.min_fatalities);
   const limit = argNum(params.limit) ?? DEFAULT_LIST_LIMIT;
+  const stored = oldestDatedRows(data, CONFLICT_EVENT_LOCATED_LISTS);
   if (country) {
     narrowNested(data, 'ucdp-events', 'events', (e) => ciIncludes(e.country, country));
     narrowNested(data, 'events', 'events', (e) => ciIncludes(e.country, country));
@@ -321,8 +328,9 @@ function filterConflictEvents(data: Record<string, unknown>, params: Record<stri
     narrowNested(data, 'ucdp-events', 'events', (e) => (argNum(e.deathsBest) ?? 0) >= minFatal);
     narrowNested(data, 'events', 'events', (e) => (argNum(e.fatalities) ?? 0) >= minFatal);
   }
+  const geo = filterEventLists(data, CONFLICT_EVENT_LOCATED_LISTS, params, 'get_conflict_events', stored);
   for (const label of CONFLICT_EVENT_LISTS) capNested(data, label, 'events', limit);
-  return data;
+  return attachGeoFilter(data, geo);
 }
 
 export function filterConflictPanelEvents(data: Record<string, unknown>, params: Record<string, unknown>): Record<string, unknown> {
@@ -1328,7 +1336,7 @@ export const CACHE_TOOLS: ToolDef[] = [
     title: 'Armed conflict and unrest events',
     _uiResourceUri: CONFLICT_EVENTS_UI_URI,
     _outputBudgetBytes: CONFLICT_EVENTS_OUTPUT_BUDGET_BYTES,
-    description: 'Return the seeded conflict snapshot: active armed-conflict events (UCDP and Iran tracker) and unrest events with coordinates, fatalities and dates, plus country risk scores. UCDP data is flagged stale after 30 minutes, unrest after 2 hours. Event-level records; no narrative or forecasts. Seeded-cache read with no live fetch: weight 1 on API plans, included in the signed-in free allowance. country matches event country names and the alpha-2 code on risk scores; min_fatalities drops events below a count; limit caps each list (default 30, 0 for no cap). Dedicated paid connections reuse one panel allocation across openings and filters; refresh with request_id starts a new one; authorized panel_request reads report current usage when confirmed. API and free allowances retain per-tool billing and reject paid controls.',
+    description: 'Return the seeded conflict snapshot: active armed-conflict events (UCDP and Iran tracker) and unrest events with coordinates, fatalities and dates, plus country risk scores. UCDP data is flagged stale after 30 minutes, unrest after 2 hours. Event-level records; no narrative or forecasts. Seeded-cache read with no live fetch: weight 1 on API plans, included in the signed-in free allowance. country matches event country names and the alpha-2 code on risk scores; min_fatalities drops events below a count; limit caps each list (default 30, 0 for no cap). Dedicated paid connections reuse one panel allocation across openings and filters; refresh with request_id starts a new one; authorized panel_request reads report current usage when confirmed. API and free allowances retain per-tool billing and reject paid controls. bbox or lat/lon/radius_km limit the area, since_days the last N days; geo_filter counts rows lacking coordinates or dates.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1344,6 +1352,7 @@ export const CACHE_TOOLS: ToolDef[] = [
         panel_request: { type: 'string', description: 'Paid conflict panel receipt for bounded internal filtered reads without another daily allocation.' },
         refresh: { type: 'boolean', description: 'Request one new paid conflict panel allocation. Requires request_id and no panel_request.' },
         request_id: { type: 'string', format: 'uuid', description: 'Retry identity for an explicit paid refresh. Reuse the ID to avoid another allocation.' },
+        ...GEO_FILTER_PROPERTIES,
       },
       required: [],
     },
@@ -1406,6 +1415,7 @@ export const CACHE_TOOLS: ToolDef[] = [
             returned_event_count: { type: 'number' },
           },
         },
+        geo_filter: GEO_FILTER_OUTPUT_SCHEMA,
       }) as { properties: Record<string, unknown> };
       return {
         ...envelope,
@@ -1424,6 +1434,7 @@ export const CACHE_TOOLS: ToolDef[] = [
     })(),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     _summarize: summarizeConflictEvents,
+    _validateArgs: params => { parseEventFilter(params, 'get_conflict_events'); },
     _postFilter: (data, params) => presentConflictEvents(filterConflictEvents(data, params), params),
     _cacheKeys: [
       'conflict:ucdp-events:v1',
@@ -1672,7 +1683,7 @@ export const CACHE_TOOLS: ToolDef[] = [
     title: 'Earthquakes, wildfires and natural hazards',
     _uiResourceUri: NATURAL_DISASTERS_UI_URI,
     _outputBudgetBytes: 131072,
-    description: 'Recent M4.5+ earthquakes (USGS and Earthquakes Canada / NRCan), active wildfires (NASA FIRMS), and natural hazard events. Pro panels charge one allocation per opening; repeated views reuse the admission. Snapshot reuse is bounded by source clocks and known health, not complete provider coverage. An oversized response simplifies or omits storm geometry and regional detail, with explicit transportCoverage counts; a jmespath projection that fits returns the original detail.',
+    description: 'Recent M4.5+ earthquakes (USGS and Earthquakes Canada / NRCan), active wildfires (NASA FIRMS), and natural hazard events. Pro panels charge one allocation per opening; repeated views reuse the admission. Snapshot reuse is bounded by source clocks and known health, not complete provider coverage. An oversized response simplifies or omits storm geometry and regional detail, with explicit transportCoverage counts; a jmespath projection that fits returns the original detail. bbox or lat/lon/radius_km limit the area, since_days the last N days; geo_filter counts rows lacking coordinates or dates.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1687,6 +1698,7 @@ export const CACHE_TOOLS: ToolDef[] = [
         min_magnitude: { type: 'number', description: 'Drop earthquakes and natural events below this magnitude.' },
         active_only: { type: 'boolean', description: 'Keep only natural events that are still active (not closed).' },
         limit: { type: 'number', description: 'Cap each hazard list to at most this many items (default 30, pass 0 for no cap).' },
+        ...GEO_FILTER_PROPERTIES,
       },
       required: [],
     },
@@ -1733,6 +1745,7 @@ export const CACHE_TOOLS: ToolDef[] = [
           } } },
         },
       },
+      geo_filter: GEO_FILTER_OUTPUT_SCHEMA,
       }) as { properties: Record<string, unknown> };
       return { ...schema, properties: { ...schema.properties, transportCoverage: {
         type: 'object', required: ['count_scope', 'details'], properties: {
@@ -1756,22 +1769,25 @@ export const CACHE_TOOLS: ToolDef[] = [
     _postFilter: (data, params) => {
       const minMag = argNum(params.min_magnitude);
       data.events = projectNaturalEventsRetention(data.events);
+      const stored = oldestDatedRows(data, NATURAL_DISASTER_EVENT_LISTS);
       const limit = (argNum(params.limit) ?? DEFAULT_LIST_LIMIT);
       if (minMag != null) {
         narrowNested(data, 'earthquakes', 'earthquakes', (q) => (argNum(q.magnitude) ?? 0) >= minMag);
         narrowNested(data, 'events', 'events', (e) => (argNum(e.magnitude) ?? 0) >= minMag);
       }
       if (argBool(params.active_only)) narrowNested(data, 'events', 'events', (e) => e.closed === false);
+      const geo = filterEventLists(data, NATURAL_DISASTER_EVENT_LISTS, params, 'get_natural_disasters', stored);
       capNested(data, 'earthquakes', 'earthquakes', limit);
       capNested(data, 'fires', 'fireDetections', limit);
       capNested(data, 'events', 'events', limit);
       const ds = argStrList(params.dataset);
       if (ds.length > 0) {
         const map: Record<string, string> = { earthquakes: 'earthquakes', wildfires: 'fires', other: 'events' };
-        return selectDatasets(data, compact(ds.map((d) => map[d])));
+        return attachGeoFilter(selectDatasets(data, compact(ds.map((d) => map[d]))), geo);
       }
-      return data;
+      return attachGeoFilter(data, geo);
     },
+    _validateArgs: params => { parseEventFilter(params, 'get_natural_disasters'); },
     _fitToBudget: (result, budgetBytes, args) => presentNaturalDisastersPanel(result, budgetBytes, argBool(args.summary)),
     _cacheKeys: [
       'seismology:earthquakes:v1',

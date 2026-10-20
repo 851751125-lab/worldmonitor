@@ -6,7 +6,7 @@ import { readFileSync as originalReadFileSync, existsSync, readdirSync, mkdirSyn
 import { tmpdir } from 'node:os';
 import { MACHINE_READABLE_URLS } from '../scripts/build-sitemap.mjs';
 import { nonDefaultLandingLocales } from '../shared/indexable-landing-locales.ts';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 function readFileSync(path, options) {
   const content = originalReadFileSync(path, options);
   if (typeof content === 'string') {
@@ -4850,7 +4850,9 @@ describe('agent readiness: crawl-budget disallows (#7660)', () => {
           // bare prose mention (`// [sw_lat, sw_lon, …]` documenting an array
           // order) is not a parameter and must not trip this.
           const asQueryKey = new RegExp(`['"\`]${needle}['"\`]|[?&]${needle}=`);
-          if (asQueryKey.test(body)) acc.push({ path: full, apiScoped: body.includes('/api/') });
+          // MCP tool arguments travel in JSON-RPC POST bodies, never in a URL.
+          const mcpArgument = relative(resolve(__dirname, '..'), full).startsWith(join('api', 'mcp') + sep);
+          if (asQueryKey.test(body)) acc.push({ path: full, apiScoped: body.includes('/api/') || mcpArgument });
         }
         return acc;
       };

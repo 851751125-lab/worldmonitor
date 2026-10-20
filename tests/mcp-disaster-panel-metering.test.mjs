@@ -61,6 +61,19 @@ describe('Natural Disasters paid admission and original source deadlines', () =>
     Object.assign(process.env, originalEnv);
   });
 
+  it('applies area and age filters on a dedicated panel connection', async () => {
+    sources[sourceKeys[1]].data.fireDetections = [
+      { id: 'athens', location: { latitude: 38.1, longitude: 23.8 }, detectedAt: now - 3_600_000 },
+      { id: 'thessaloniki', location: { latitude: 40.64, longitude: 22.94 }, detectedAt: now - 3_600_000 },
+    ];
+    const { deps } = makeProDeps();
+    const result = await invoke(deps, { dataset: ['wildfires'], lat: 37.98, lon: 23.73, radius_km: 100, since_days: 1 });
+    assert.equal(result.body.error, undefined, JSON.stringify(result.body));
+    const data = envelope(result).data;
+    assert.deepEqual(data.fires.fireDetections.map(row => row.id), ['athens']);
+    assert.equal(data.geo_filter.area.radius_km, 100);
+  });
+
   it('opens once, reuses normalized filters and stores the canonical original before summary or projection', async () => {
     const bundle = fixture();
     const first = await invoke(bundle.deps); await invoke(bundle.deps);

@@ -63,6 +63,23 @@ describe('signed Conflict Events panel through the protected MCP handler', () =>
     Object.assign(process.env, originalEnv);
   });
 
+  it('applies area and age filters on a dedicated panel connection', async () => {
+    const now = Date.now();
+    sources['conflict:ucdp-events:v1'].events = [
+      { id: 'paris', country: 'France', deathsBest: 1, location: { latitude: 48.86, longitude: 2.35 }, dateStart: now - 86_400_000 },
+      { id: 'lyon', country: 'France', deathsBest: 1, location: { latitude: 45.76, longitude: 4.84 }, dateStart: now - 86_400_000 },
+      { id: 'old-paris', country: 'France', deathsBest: 1, location: { latitude: 48.85, longitude: 2.34 }, dateStart: now - 30 * 86_400_000 },
+    ];
+    const { deps } = makeProDeps();
+    const result = await invoke(deps, { lat: 48.86, lon: 2.35, radius_km: 50, since_days: 7 });
+    assert.equal(result.body.error, undefined, JSON.stringify(result.body));
+    const data = envelope(result).data;
+    assert.deepEqual(data['ucdp-events'].events.map(event => event.id), ['paris']);
+    assert.equal(data.geo_filter.area.kind, 'radius');
+    const invalid = await invoke(deps, { lat: 48.86, radius_km: 50 });
+    assert.equal(invalid.body.error?.code, -32602, JSON.stringify(invalid.body));
+  });
+
   it('expires replay at the source deadline and recovers under the same daily admission', async () => {
     let clock = Date.UTC(2026, 9, 5, 12);
     Date.now = () => clock;

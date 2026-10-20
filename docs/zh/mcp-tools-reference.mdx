@@ -978,8 +978,14 @@ curl -s https://worldmonitor.app/mcp \
 | `panel_request` | string | 付费冲突事件凭据，在到期前复用受限内部筛选读取。API 和免费账户不接受。 |
 | `refresh` | boolean | 仅限付费面板。true 需附带 UUID request_id，并省略 panel_request，以开始一次新分配。 |
 | `request_id` | string | 显式付费刷新的 UUID。同一 UUID 的重试复用分配及原始到期时间，字母大小写不改变身份。 |
+| `bbox` | object | 仅保留此范围内的事件。sw_lon > ne_lon 表示跨越 180° 经线。不能与 lat/lon/radius_km 同时使用。 |
+| `lat` | number | radius_km 的中心纬度；需同时提供 lon 和 radius_km。 |
+| `lon` | number | radius_km 的中心经度；需同时提供 lat 和 radius_km。 |
+| `radius_km` | number | 仅保留距 lat/lon 大圆距离在此范围内的事件（最大 2000）。 |
+| `since_days` | integer | 仅保留最近 N 天内的事件。 |
 
 - **API 端点：** `GET /api/conflict/v1/list-iran-events`, `GET /api/conflict/v1/list-ucdp-events`, `GET /api/unrest/v1/list-unrest-events`
+- **区域与时间筛选：** `bbox` 需提供 `sw_lat`、`sw_lon`、`ne_lat` 和 `ne_lon`（均为必填）。请只传 `bbox`，或同时传 `lat`、`lon` 和 `radius_km` 三者；混用或只传部分半径参数会在扣除任何额度前返回 Invalid params。筛选作用于 UCDP、伊朗和动荡事件，在 `country` 与 `min_fatalities` 之后、`limit` 之前执行；国家风险评分没有坐标，不受筛选。缺少有效坐标（或在使用 `since_days` 时缺少日期）的事件会被丢弃，`data.geo_filter.excluded` 按列表统计这些行，避免把空结果误读为附近没有事件。当 `since_days` 早于某列表最早的带日期行时，`data.geo_filter.oldest_held` 给出该行的时间（epoch 毫秒），避免把宽时间窗误读为完整覆盖。不传这些参数时响应不含 `geo_filter`。
 - **访问与计量：** `free-account`。免费账户使用免费额度，API 套餐保留按工具权重计费。Pro 与 Pro Business 首次打开扣一次额度，规范化筛选与重复打开在五分钟内复用冲突事件分配。每份分配最多允许 64 次未缓存工具执行，未缓存执行与成功缓存回放分别限制为每分钟 64 次。每次执行读取五个固定 Redis 键，启用伊朗事件时为六个，不分别扣额度。
 - **复用与刷新：** 相同筛选的成功原始结果在摘要或 JMESPath 呈现之前回放。显式刷新使用新的 UUID 扣一次新额度；同一 UUID 的重试复用该分配。授权凭据读取查询当前额度，不另行预留；计数器未知时保留数据并省略数字通知。付费参数在预留前拒绝未知字段及非有限数值。普通 API 和免费调用保留既有筛选转换，不接受付费凭据或刷新控制。
 - **来源观察与恢复：** 可选 `conflict_source.ucdp` 仅保留已读取元数据中类型正确的 `fetchedAt`、`candidateVersion`、`candidateComplete` 和 `annualFailedPages`，缺失字段保持缺失。已知不完整、缺失、格式错误、过期或不兼容的数据保持可重试；可用列表仍按请求筛选。元数据与数据不是原子快照，该观察不能证明所有动荡提供方的完整覆盖或 CII/伊朗的独立新鲜度。
@@ -2201,8 +2207,14 @@ curl -s https://worldmonitor.app/mcp \
 | `min_magnitude` | number | 丢弃低于此震级的地震和自然事件。 |
 | `active_only` | boolean | 仅保留仍处于活跃状态（未关闭）的自然事件。 |
 | `limit` | number | 将每个灾害列表限制为最多这么多项（默认 30，传 0 表示不限）。 |
+| `bbox` | object | 仅保留此范围内的事件。sw_lon > ne_lon 表示跨越 180° 经线。不能与 lat/lon/radius_km 同时使用。 |
+| `lat` | number | radius_km 的中心纬度；需同时提供 lon 和 radius_km。 |
+| `lon` | number | radius_km 的中心经度；需同时提供 lat 和 radius_km。 |
+| `radius_km` | number | 仅保留距 lat/lon 大圆距离在此范围内的事件（最大 2000）。 |
+| `since_days` | integer | 仅保留最近 N 天内的事件。 |
 
 - **API 端点：** `GET /api/natural/v1/list-natural-events`, `GET /api/seismology/v1/list-earthquakes`, `GET /api/wildfire/v1/list-fire-detections`
+- **区域与时间筛选：** `bbox` 需提供 `sw_lat`、`sw_lon`、`ne_lat` 和 `ne_lon`（均为必填）。请只传 `bbox`，或同时传 `lat`、`lon` 和 `radius_km` 三者；混用或只传部分半径参数会在扣除任何额度前返回 Invalid params。筛选作用于地震、火点和自然事件（包括区域列表 `events.westernPacific.events` 与 `events.hkoWarnings.warnings`），在 `min_magnitude` 与 `active_only` 之后、`limit` 之前执行。缺少有效坐标（或在使用 `since_days` 时缺少日期）的行会被丢弃，`data.geo_filter.excluded` 按数据集统计这些行，避免把空结果误读为附近没有事件。当 `since_days` 早于某列表最早的带日期行时，`data.geo_filter.oldest_held` 给出该行的时间（epoch 毫秒），避免把宽时间窗误读为完整覆盖。不传这些参数时响应不含 `geo_filter`。
 - **类型：** 缓存读取 — 来自 Redis 引导缓存的亚秒级响应。
 - **新鲜度预算：** 标记 `stale: true` 前最多 **30 分钟**（由 seeder cron 的预期间隔设定）。
 
