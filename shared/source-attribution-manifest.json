@@ -14292,6 +14292,9 @@
       "status": "terms-review",
       "references": [
         {
+          "path": "scripts/check-submarine-cable-gaps.mjs"
+        },
+        {
           "path": "scripts/seed-submarine-cables.mjs"
         }
       ]
