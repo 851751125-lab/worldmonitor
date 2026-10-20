@@ -227,7 +227,15 @@ function registerSidecarAllowedPrivateFetchOrigins(port, extraOrigins = []) {
 }
 
 function isAllowedPrivateSidecarFetch(url) {
-  return sidecarAllowedPrivateFetchOrigins.has(url.origin);
+  if (sidecarAllowedPrivateFetchOrigins.has(url.origin)) return true;
+  // Desktop users can change Ollama settings without restarting the sidecar.
+  // Trust only the current configured origin, never an address from a request.
+  if (process.env.LOCAL_API_MODE === 'tauri-sidecar' && process.env.OLLAMA_API_URL) {
+    try {
+      return url.origin === new URL(process.env.OLLAMA_API_URL).origin;
+    } catch { /* invalid configuration grants no private-network access */ }
+  }
+  return false;
 }
 
 async function assertSafeSidecarFetchUrl(url) {
@@ -979,6 +987,7 @@ const cloudPreferredExact = new Set([
   '/api/intelligence/v1/compute-energy-shock',
   '/api/intelligence/v1/get-china-decision-signals',
   '/api/intelligence/v1/get-country-energy-profile',
+  '/api/intelligence/v1/get-country-history',
   '/api/intelligence/v1/get-country-port-activity',
   '/api/intelligence/v1/get-country-risk',
   '/api/intelligence/v1/get-gdelt-topic-timeline',
