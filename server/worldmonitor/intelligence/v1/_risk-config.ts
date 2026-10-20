@@ -17,7 +17,8 @@
 //      public-facing section so downstream users of the proto API see why score
 //      values or movement semantics may shift between deploys.
 //
-// Last reviewed: 2026-10-19 (v12 — strike pressure: strikes on a country, from the
+// Last reviewed: 2026-10-20 (v13 adds a bounded fresh arrival surge boost;
+// v12 — strike pressure: strikes on a country, from the
 // strike feed and GDELT worldwide, decay over days into a floor and a boost on the
 // composite, replacing the 72h strikeBoost in Conflict; v11 — real country borders replace bounding boxes for geo
 // events, and a sustained GDELT level joins escalation (cap 50 -> 70); v10 — GDELT
@@ -35,7 +36,7 @@
  * Bump on coefficient or scoring-contract changes so API clients can detect
  * score or movement-semantics drift.
  */
-export const CII_FORMULA_VERSION = 'v12';
+export const CII_FORMULA_VERSION = 'v13';
 
 /**
  * Conflict event activity log curve used before fatality/civilian/strike boosts.

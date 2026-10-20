@@ -6,6 +6,7 @@ All notable changes to World Monitor are documented here.
 
 ### Changed
 
+- **Cross-border movements and CII formula `v13`**: add separately dated UK daily arrivals and CBP monthly encounters beside UNHCR ODP reports, with source health, country/route API filters, an opt-in MCP movement view, and distinct death markers. Fresh source-confirmed arrival surges add five CII points once per explicitly named country. Stock, encounters, deaths, and stale reports do not trigger this boost. `combinedScore` can rise by five points. The risk-score cache key family moves to `risk:scores:sebuf:v13` and emitted `methodology_version` moves to `v13`. Additional route sources remain blocked by permission or access, so global coverage acceptance is incomplete.
 - **CII formula `v12`: a country under attack keeps rising, and recovers once the strikes stop, worldwide** (2026-10-19).
   v11 counted strikes only through a 72h term inside Conflict, which carries 18%
   of the composite, so Saudi Arabia scored 54 on Oct 19 under repeated missile

@@ -1,15 +1,15 @@
 import { getRpcBaseUrl } from '@/services/rpc-client';
 import type {
   GetDisplacementSummaryResponse as ProtoResponse,
+  GetCrossBorderMovementsResponse,
   CountryDisplacement as ProtoCountry,
   DisplacementFlow as ProtoFlow,
 } from '@/generated/client/worldmonitor/displacement/v1/service_client';
 import { createCircuitBreaker, getCSSColor } from '@/utils';
 import { DisplacementServiceClient } from '@/services/generated-rpc-clients';
 import { publicRpcFetch } from '@/services/public-rpc-fetch';
-import { ensureHydrated } from '@/services/bootstrap';
 import { EMPTY_INTERNAL_DISPLACEMENT, toInternalDisplacementData, type InternalDisplacementData } from './internal';
-import { EMPTY_CROSS_BORDER, toCrossBorderData, type CrossBorderData } from './cross-border';
+import { toMovementData, type CrossBorderData } from './cross-border';
 
 export * from './internal';
 export * from './cross-border';
@@ -170,19 +170,20 @@ export async function fetchInternalDisplacement(): Promise<InternalDisplacementD
 
 // ─── Cross-border movements (UNHCR Operational Data Portal) ───
 
-const crossBorderBreaker = createCircuitBreaker<CrossBorderData>({
-  name: 'UNHCR Cross-Border Movements',
+const crossBorderBreaker = createCircuitBreaker<GetCrossBorderMovementsResponse>({
+  name: 'Cross-Border Movement Reports',
   cacheTtlMs: 30 * 60 * 1000,
   persistCache: true,
 });
 
-// On-demand bootstrap key: fetched only when the panel or map layer needs it.
+// Fetch only when the displacement panel or layer needs the source-dated view.
 export async function fetchCrossBorderArrivals(): Promise<CrossBorderData> {
-  return crossBorderBreaker.execute(async () => {
-    const data = toCrossBorderData(await ensureHydrated('crossBorderArrivals'));
-    if (data.situations.length === 0) throw new Error('cross-border arrivals unavailable');
-    return data;
-  }, EMPTY_CROSS_BORDER, { shouldCache: (r) => r.situations.length > 0 });
+  const response = await crossBorderBreaker.execute(async () => {
+    const result = await new DisplacementServiceClient(getRpcBaseUrl(), { fetch: publicRpcFetch }).getCrossBorderMovements({ countryCode: '', route: '' });
+    if (!result.dataAvailable) throw new Error('cross-border movements unavailable');
+    return result;
+  }, { movements: [], sources: [], dataAvailable: false }, { shouldCache: (r) => r.movements.length > 0 });
+  return toMovementData(response);
 }
 
 // ─── Presentation helpers (copied verbatim from legacy src/services/unhcr.ts) ───

@@ -44,8 +44,8 @@ The top-level `status` describes user-visible platform availability, not perfect
 {
   "status": "HEALTHY | WARNING | DEGRADED | UNHEALTHY | REDIS_DOWN | REFRESH_PENDING",
   "summary": {
-    "total": 328,
-    "ok": 328,
+    "total": 332,
+    "ok": 332,
     "warn": 0,
     "containedWarn": 0,
     "onDemandWarn": 0,
@@ -401,7 +401,7 @@ The conflict family is satisfied by the ACLED path, the UCDP event feed, or,
 while the ACLED path returns no events, a live GDELT snapshot from
 `gdelt:bulk:country-events:v1` for a Tier-1 country (fresh, with either its
 baseline and current window complete or its seven-day week ready), matching the
-CII v12 scorer. The GDELT snapshot counts even when its escalation and level
+CII v13 scorer. The GDELT snapshot counts even when its escalation and level
 scores are 0. When those feeds are reachable but quiet,
 `riskScores` can still report
 `COVERAGE_PARTIAL`; underlying feed freshness is tracked by the source-specific

@@ -52,7 +52,7 @@ export const BOOTSTRAP_CACHE_KEYS = Object.freeze({
   renewableEnergy: 'economic:worldbank-renewable:v1',
   positiveGeoEvents: 'positive_events:geo-bootstrap:v1',
   theaterPosture: 'theater_posture:sebuf:stale:v1',
-  riskScores: 'risk:scores:sebuf:stale:v12',
+  riskScores: 'risk:scores:sebuf:stale:v13',
   naturalEvents: 'natural:events:v1',
   flightDelays: 'aviation:delays-bootstrap:v2',
   insights: 'news:insights:v1',
@@ -244,8 +244,8 @@ const ON_DEMAND_KEY_NAMES = new Set([
   // payload stays minimal: channel id to video id and timestamps, no titles,
   // enforced by validateResolvedPayload in scripts/seed-live-video-resolved.mjs.
   'liveVideoResolved',
-  // UNHCR Operational Data Portal cross-border movements (#9023), read by the
-  // displacement panel and map layer only when they are open.
+  // Legacy ODP bootstrap/widget contract. The dashboard uses the source-dated
+  // movement RPC; retain this on-demand key until legacy clients migrate.
   'crossBorderArrivals',
 ]);
 

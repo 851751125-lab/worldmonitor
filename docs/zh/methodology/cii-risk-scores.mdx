@@ -58,7 +58,7 @@ WorldMonitor 确实做预测的地方，那份记录会公开发布。[预测准
 覆盖的国家是一份**策展的监测范围**，而非全部主权国家——参见[一级国家标准](#2-各国-baselinerisk-和-eventmultiplier)。CRI 覆盖更广的 196 国范围。
 
 <Note>
-**面向开发者。** CII 与战略风险汇总由 `GET /api/intelligence/v1/get-risk-scores`（proto `worldmonitor.intelligence.v1.GetRiskScoresResponse`）提供。每个 `CiiScore` 上传输的 `methodology_version` 字段记录了计算该评分时本文档所处的修订版本。当前版本为 **v12**——参见[版本历史](#版本历史)。
+**面向开发者。** CII 与战略风险汇总由 `GET /api/intelligence/v1/get-risk-scores`（proto `worldmonitor.intelligence.v1.GetRiskScoresResponse`）提供。每个 `CiiScore` 上传输的 `methodology_version` 字段记录了计算该评分时本文档所处的修订版本。当前版本为 **v13**——参见[版本历史](#版本历史)。
 </Note>
 
 ---
@@ -259,6 +259,8 @@ overallScore = min(100, round(weightedAvg * 0.70 + 15))             # banded to 
 任何更改服务端/API 各国基线、事件乘数、气候分区的国家归属、战略风险汇总系数、内联服务端公式字面量、受保护的顶级公式常量或 CII 移动语义的编辑，**必须**同时提升 `server/worldmonitor/intelligence/v1/_risk-config.ts` 中的 `CII_FORMULA_VERSION`、在同一提交中更新本文档，并新增一条公开 CHANGELOG 条目。保留服务端/API 评分的真相源重构不提升传输版本。`tests/cii-scoring.test.mts` 中的测试会强制本文档列出 `CURATED_COUNTRIES` 中的每一个国家代码。
 
 ## 版本历史
+
+> **v13（2026-10-20）。** 保留 v12 打击压力，并对来源确认的新鲜入境激增向明确命名的国家增加一次五分。存量、遭遇事件、死亡与陈旧报告不触发加成。缓存键与 `methodology_version` 迁移至 `v13`。
 
 > **v12（2026-10-19）。** 打击压力，适用于全球。遭受打击的国家现在会上升，持续遭受攻击则继续上升，
 > 打击停止后在一到两周内回落。v11 只通过 Conflict 分量内的 72 小时项计入打击（占综合分 18%）：

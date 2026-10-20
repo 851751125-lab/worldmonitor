@@ -117,6 +117,8 @@ const CII_PROTOCOL_SNAPSHOT_HASH_BY_VERSION: Record<string, string> = {
   // floor and a boost) and drops the 72h strikeBoost from Conflict; the snapshot
   // now guards the strike constants and the strike helpers' literals.
   v12: '65bce5e1570edb82984c26b2161fab83656009baecbd45efe713b7cf28b01e0b',
+  // v13 retains strike pressure and adds the fresh arrival surge boost.
+  v13: '973a91e2a1064f5b409aabe3f96f847681d759f1fe689c833356a412b32c7967',
 };
 
 const GUARDED_TOP_LEVEL_SCORE_CONST_NAMES = ['NEWS_THREAT_WEIGHT', 'UCDP_CLASSIFICATION_WINDOW_MS'];
@@ -578,6 +580,7 @@ function emptyAux() {
     orefData: null as { activeAlertCount: number; historyCount24h: number } | null,
     advisories: null as { byCountry: Record<string, 'do-not-travel' | 'reconsider' | 'caution'> } | null,
     displacedByIso3: {} as Record<string, number>,
+    crossBorderSurgeCountries: [] as string[],
     newsTopStories: [] as Array<{ countryCode: string | null; countryCodes?: string[]; threatLevel: string; primaryTitle: string }>,
     threatSummaryByCountry: null as Record<string, { critical: number; high: number; medium: number; low: number; info: number }> | null,
     aviationAlerts: [] as any[],
@@ -2769,4 +2772,27 @@ describe('CII scoring', () => {
     );
   });
 
+});
+
+
+it('fresh arrival surge gives one bounded boost to a named country', () => {
+  const base = computeCIIScores([], emptyAux());
+  const aux = emptyAux();
+  aux.crossBorderSurgeCountries = ['GB', 'GB'];
+  const result = computeCIIScores([], aux);
+  assert.equal(scoreFor(result, 'GB')!.combinedScore, scoreFor(base, 'GB')!.combinedScore + 5);
+  assert.equal(scoreFor(result, 'US')!.combinedScore, scoreFor(base, 'US')!.combinedScore);
+});
+
+it('arrival surge preserves strike pressure in the combined formula', () => {
+  const nowMs = Date.parse('2026-10-20T12:00:00Z');
+  const calm = computeCIIScores([], emptyAux(), { nowMs });
+  const aux = { ...emptyAux(), confirmedStrikes: { GB: { '2026-10-20': 1 } } };
+  const strikes = computeCIIScores([], aux, { nowMs });
+  aux.crossBorderSurgeCountries = ['GB', 'GB'];
+  const combined = computeCIIScores([], aux, { nowMs });
+  assert.ok(scoreFor(strikes, 'GB')!.combinedScore > scoreFor(calm, 'GB')!.combinedScore);
+  assert.equal(scoreFor(combined, 'GB')!.combinedScore, scoreFor(strikes, 'GB')!.combinedScore + 5);
+  assert.equal(scoreFor(combined, 'US')!.combinedScore, scoreFor(strikes, 'US')!.combinedScore);
+  assert.equal(scoreFor(combined, 'GB')!.methodologyVersion, CII_FORMULA_VERSION);
 });
