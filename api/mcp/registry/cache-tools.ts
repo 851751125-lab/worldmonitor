@@ -6,6 +6,8 @@ import { CAPITAL_FLOW_PAIR_LEG_SCHEMA, CAPITAL_FLOWS_MAX_COUNTRIES, CAPITAL_FLOW
 import ISO2_TO_ISO3 from '../../../shared/iso2-to-iso3.js';
 import { MARKET_ASSET_CLASSES } from '../../../shared/panel-admission';
 import { normalizeSocialVelocity } from '../../_social-velocity.js';
+// @ts-expect-error - existing Edge-safe JavaScript module has no declaration.
+import { assessContentAge } from '../../_content-age.js';
 import { projectNaturalEventsRetention } from '../../_natural-events-dashboard.js';
 import { NATURAL_DISASTER_EVENT_LISTS, presentNaturalDisastersPanel } from '../_natural-disasters-reuse';
 import { GEO_FILTER_OUTPUT_SCHEMA, GEO_FILTER_PROPERTIES, attachGeoFilter, filterEventLists, locationPoint, locator, oldestDatedRows, parseEventFilter, pointAt, type EventList } from '../_geo-filter';
@@ -168,7 +170,7 @@ const CONFLICT_EVENT_LOCATED_LISTS: EventList[] = [
   { label: 'events', list: 'events', locator: locator(locationPoint, 'occurredAt') },
 ];
 const CONFLICT_EVENTS_FRESHNESS_CHECKS: [FreshnessCheck, ...FreshnessCheck[]] = [
-  { key: 'seed-meta:conflict:ucdp-events', maxStaleMin: 30 },
+  { key: 'seed-meta:conflict:ucdp-events', maxStaleMin: 420, honorContentAge: true },
   { key: 'seed-meta:unrest:events', maxStaleMin: 120 },
 ];
 const CONFLICT_PANEL_COLLECTIONS: [string, string][] = [['ucdp-events', 'events'], ['events', 'events'], ['scores', 'ciiScores'], ...(IRAN_EVENTS_ENABLED ? [['iran-events', 'events'] as [string, string]] : [])];
@@ -299,7 +301,10 @@ export function conflictPanelReuseUntil(value: unknown, now = Date.now()): numbe
   const cachedAt = Date.parse(value.cached_at as string);
   const source = value.conflict_source as ConflictSourceObservation;
   if (cachedAt > now || (source.ucdp.fetchedAt ?? Number.POSITIVE_INFINITY) > now) return null;
-  const deadline = cachedAt + Math.min(...CONFLICT_EVENTS_FRESHNESS_CHECKS.map(check => check.maxStaleMin)) * 60_000;
+  const content = assessContentAge(source.ucdp, now);
+  if (content?.contentStale) return null;
+  const contentDeadline = content ? content.newestItemAt! + (content.maxContentAgeMin + 0.5) * 60_000 : Number.POSITIVE_INFINITY;
+  const deadline = Math.min(contentDeadline, cachedAt + Math.min(...CONFLICT_EVENTS_FRESHNESS_CHECKS.map(check => check.maxStaleMin)) * 60_000);
   return deadline > now ? deadline : null;
 }
 
@@ -310,6 +315,8 @@ export function projectConflictSourceObservation(value: unknown): ConflictSource
     if (typeof value.candidateVersion === 'string' || value.candidateVersion === null) ucdp.candidateVersion = value.candidateVersion;
     if (typeof value.candidateComplete === 'boolean') ucdp.candidateComplete = value.candidateComplete;
     if (Number.isSafeInteger(value.annualFailedPages) && (value.annualFailedPages as number) >= 0) ucdp.annualFailedPages = value.annualFailedPages as number;
+    if ('newestItemAt' in value) ucdp.newestItemAt = typeof value.newestItemAt === 'number' && Number.isFinite(value.newestItemAt) ? value.newestItemAt : null;
+    if (typeof value.maxContentAgeMin === 'number' && Number.isFinite(value.maxContentAgeMin)) ucdp.maxContentAgeMin = value.maxContentAgeMin;
   }
   return { ucdp };
 }
@@ -1336,7 +1343,7 @@ export const CACHE_TOOLS: ToolDef[] = [
     title: 'Armed conflict and unrest events',
     _uiResourceUri: CONFLICT_EVENTS_UI_URI,
     _outputBudgetBytes: CONFLICT_EVENTS_OUTPUT_BUDGET_BYTES,
-    description: 'Return the seeded conflict snapshot: active armed-conflict events (UCDP and Iran tracker) and unrest events with coordinates, fatalities and dates, plus country risk scores. UCDP data is flagged stale after 30 minutes, unrest after 2 hours. Event-level records; no narrative or forecasts. Seeded-cache read with no live fetch: weight 1 on API plans, included in the signed-in free allowance. country matches event country names and the alpha-2 code on risk scores; min_fatalities drops events below a count; limit caps each list (default 30, 0 for no cap). Dedicated paid connections reuse one panel allocation across openings and filters; refresh with request_id starts a new one; authorized panel_request reads report current usage when confirmed. API and free allowances retain per-tool billing and reject paid controls. bbox or lat/lon/radius_km limit the area, since_days the last N days; geo_filter counts rows lacking coordinates or dates.',
+    description: 'Return the seeded conflict snapshot: active armed-conflict events (UCDP and Iran tracker) and unrest events with coordinates, fatalities and dates, plus country risk scores. UCDP fetches expire after 7 hours, event content after 90 days; unrest after 2 hours. Event-level records; no narrative or forecasts. Seeded-cache read with no live fetch: weight 1 on API plans, included in the signed-in free allowance. country matches event country names and the alpha-2 code on risk scores; min_fatalities drops events below a count; limit caps each list (default 30, 0 for no cap). Dedicated paid connections reuse one panel allocation across openings and filters; refresh with request_id starts a new one; authorized panel_request reads report current usage when confirmed. API and free allowances retain per-tool billing and reject paid controls. bbox or lat/lon/radius_km limit the area, since_days the last N days; geo_filter counts rows lacking coordinates or dates.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1427,6 +1434,7 @@ export const CACHE_TOOLS: ToolDef[] = [
             properties: { ucdp: { type: 'object', properties: {
               fetchedAt: { type: 'number' }, candidateVersion: { type: ['string', 'null'] },
               candidateComplete: { type: 'boolean' }, annualFailedPages: { type: 'integer', minimum: 0 },
+              newestItemAt: { type: ['number', 'null'] }, maxContentAgeMin: { type: 'number' },
             } } },
           },
         },

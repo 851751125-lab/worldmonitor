@@ -83,8 +83,8 @@ describe('signed Conflict Events panel through the protected MCP handler', () =>
   it('expires replay at the source deadline and recovers under the same daily admission', async () => {
     let clock = Date.UTC(2026, 9, 5, 12);
     Date.now = () => clock;
-    ucdpMeta.fetchedAt = clock - 29.5 * 60000;
-    unrestMeta.fetchedAt = clock;
+    ucdpMeta.fetchedAt = clock;
+    unrestMeta.fetchedAt = clock - 119.5 * 60000;
     const { deps, pipe } = makeProDeps();
     const first = await invoke(deps);
     const token = envelope(first).panelRequest.token;
@@ -98,13 +98,13 @@ describe('signed Conflict Events panel through the protected MCP handler', () =>
     assert.equal(expired.cached, undefined);
     assert.ok(expired.rateLimitKey.endsWith(':read'));
     const boundary = await invoke(deps, { panel_request: token });
-    assert.equal(envelope(boundary).stale, false, 'the ordinary evaluator includes the exact 30-minute boundary');
+    assert.equal(envelope(boundary).stale, false, 'the ordinary evaluator includes the exact 120-minute unrest boundary');
     assert.equal(fetched.length, 2 * readCount, 'an expired snapshot is reevaluated even at the boundary');
     clock += 1;
     const stale = await invoke(deps, { panel_request: token });
     assert.equal(envelope(stale).stale, true);
     assert.equal(fetched.length, 3 * readCount);
-    ucdpMeta.fetchedAt = clock;
+    unrestMeta.fetchedAt = clock;
     const recovered = await invoke(deps, { panel_request: token });
     assert.equal(envelope(recovered).stale, false);
     await invoke(deps, { panel_request: token });
@@ -112,12 +112,78 @@ describe('signed Conflict Events panel through the protected MCP handler', () =>
     assert.equal(pipe.count, 1);
   });
 
+  it('caps replay at UCDP content expiry and recovers under the same admission', async () => {
+    let clock = Date.UTC(2026, 9, 5, 12);
+    Date.now = () => clock;
+    Object.assign(ucdpMeta, { fetchedAt: clock, newestItemAt: clock - 129600 * 60000, maxContentAgeMin: 129600 });
+    unrestMeta.fetchedAt = clock;
+    const { deps, pipe } = makeProDeps();
+    const first = await invoke(deps);
+    assert.equal(envelope(first).stale, false);
+    const token = envelope(first).panelRequest.token;
+    const cacheSet = pipe.ops.flat().find(command => command[0] === 'SET' && command[1].includes(':data:'));
+    assert.equal(cacheSet.at(-1), 30, 'reuse ends when rounded content age exceeds 90 days');
+    assert.deepEqual(envelope(first).conflict_source.ucdp, ucdpMeta);
+    clock += 29_000;
+    await invoke(deps, { panel_request: token });
+    assert.equal(fetched.length, readCount);
+    clock += 1_000;
+    const expired = await invoke(deps, { panel_request: token });
+    assert.equal(envelope(expired).stale, true);
+    assert.equal(fetched.length, 2 * readCount);
+    ucdpMeta.newestItemAt = clock;
+    const recovered = await invoke(deps, { panel_request: token });
+    assert.equal(envelope(recovered).stale, false);
+    await invoke(deps, { panel_request: token });
+    assert.equal(fetched.length, 3 * readCount);
+    assert.equal(pipe.count, 1);
+  });
+
+  it('rechecks content expiry after a delayed panel cache lookup', async () => {
+    let clock = Date.UTC(2026, 9, 5, 12);
+    Date.now = () => clock;
+    Object.assign(ucdpMeta, { fetchedAt: clock, newestItemAt: clock - 129600 * 60000, maxContentAgeMin: 129600 });
+    unrestMeta.fetchedAt = clock;
+    const { deps, pipe } = makeProDeps();
+    const first = await invoke(deps);
+    clock += 29_000;
+    const pipeline = deps.redisPipeline;
+    deps.redisPipeline = async (commands, ...options) => {
+      const results = await pipeline(commands, ...options);
+      if (commands.length === 2 && commands[1][0] === 'GET' && commands[1][1].includes(':data:')) clock += 2_000;
+      return results;
+    };
+    const result = await invoke(deps, { panel_request: envelope(first).panelRequest.token });
+    assert.equal(envelope(result).stale, true);
+    assert.equal(fetched.length, 2 * readCount);
+    assert.equal(pipe.count, 1);
+  });
+
+  it('does not save when content expires during serialization', async () => {
+    let clock = Date.UTC(2026, 9, 5, 12);
+    Date.now = () => clock;
+    Object.assign(ucdpMeta, { fetchedAt: clock, newestItemAt: clock - 129600 * 60000, maxContentAgeMin: 129600 });
+    unrestMeta.fetchedAt = clock;
+    let delayed = false;
+    JSON.stringify = (value, ...args) => {
+      const text = originalStringify(value, ...args);
+      if (!delayed && value?.conflict_source && value.data) { clock += 31_000; delayed = true; }
+      return text;
+    };
+    const { deps, pipe } = makeProDeps();
+    const first = await invoke(deps);
+    assert.equal(first.body.error, undefined);
+    assert.equal(delayed, true);
+    assert.equal(pipe.ops.flat().filter(command => command[0] === 'SET' && command[1].includes(':data:')).length, 0);
+    assert.equal(pipe.count, 1);
+  });
+
   for (const [remainingMs, expectedTtl] of [[1599, 1], [999, null]]) {
     it(`floors a ${remainingMs}ms source reuse interval without overshooting it`, async () => {
       const clock = Date.UTC(2026, 9, 5, 12);
       Date.now = () => clock;
-      ucdpMeta.fetchedAt = clock - 30 * 60000 + remainingMs;
-      unrestMeta.fetchedAt = clock;
+      ucdpMeta.fetchedAt = clock;
+      unrestMeta.fetchedAt = clock - 120 * 60000 + remainingMs;
       const { deps, pipe } = makeProDeps();
       await invoke(deps);
       const sets = pipe.ops.flat().filter(command => command[0] === 'SET' && command[1].includes(':data:'));
@@ -126,11 +192,11 @@ describe('signed Conflict Events panel through the protected MCP handler', () =>
     });
   }
 
-  it('leaves old but valid unrest readable without caching a misleading shared freshness window', async () => {
+  it('leaves old but valid UCDP readable without caching a misleading shared freshness window', async () => {
     const clock = Date.UTC(2026, 9, 5, 12);
     Date.now = () => clock;
-    ucdpMeta.fetchedAt = clock;
-    unrestMeta.fetchedAt = clock - 45 * 60000;
+    ucdpMeta.fetchedAt = clock - 180 * 60000;
+    unrestMeta.fetchedAt = clock;
     const { deps, pipe } = makeProDeps();
     const first = await invoke(deps);
     assert.equal(envelope(first).stale, false);
@@ -167,8 +233,8 @@ describe('signed Conflict Events panel through the protected MCP handler', () =>
   it('checks the source deadline after a delayed cache lookup', async () => {
     let clock = Date.UTC(2026, 9, 5, 12);
     Date.now = () => clock;
-    ucdpMeta.fetchedAt = clock - 29.5 * 60000;
-    unrestMeta.fetchedAt = clock;
+    ucdpMeta.fetchedAt = clock;
+    unrestMeta.fetchedAt = clock - 119.5 * 60000;
     const { deps, pipe } = makeProDeps();
     const first = await invoke(deps);
     clock += 29_000;
@@ -188,8 +254,8 @@ describe('signed Conflict Events panel through the protected MCP handler', () =>
     it(`does not save after serialization reaches the ${label}`, async () => {
       let clock = Date.UTC(2026, 9, 5, 12);
       Date.now = () => clock;
-      ucdpMeta.fetchedAt = label === 'source deadline' ? clock - 29.5 * 60000 : clock;
-      unrestMeta.fetchedAt = clock;
+      ucdpMeta.fetchedAt = clock;
+      unrestMeta.fetchedAt = label === 'source deadline' ? clock - 119.5 * 60000 : clock;
       let delayed = false;
       JSON.stringify = (value, ...args) => {
         const text = originalStringify(value, ...args);
@@ -285,7 +351,10 @@ describe('signed Conflict Events panel through the protected MCP handler', () =>
     ['missing completeness', () => { delete ucdpMeta.annualFailedPages; }],
     ['mismatched versions', () => { ucdpMeta.candidateVersion = '26.0.8'; }],
     ['annual-only unknown candidate', () => { ucdpMeta.candidateVersion = null; ucdpMeta.candidateComplete = false; sources['conflict:ucdp-events:v1'].candidateVersion = null; }],
-    ['stale source', () => { ucdpMeta.fetchedAt -= 40 * 60000; }],
+    ['stale source', () => { ucdpMeta.fetchedAt -= 421 * 60000; }],
+    ['failed refresh', () => { ucdpMeta.status = 'error'; }],
+    ['expired event content', () => { Object.assign(ucdpMeta, { newestItemAt: Date.now() - 91 * 86400000, maxContentAgeMin: 129600 }); }],
+    ['missing event clock', () => { Object.assign(ucdpMeta, { newestItemAt: null, maxContentAgeMin: 129600 }); }],
     ['unknown source metadata', () => { ucdpMeta = null; }],
     ['failed metadata read', () => { ucdpMeta = new Error('fixture failure'); }],
     ['structured degraded source', () => { sources['unrest:events:v1'].degraded = true; }],
