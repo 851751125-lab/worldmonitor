@@ -13,14 +13,14 @@ The GitHub API returned 29 open alerts. This review uses main commit `809efd9339
 
 | Alerts | Dependency and graph | Evidence and action |
 | --- | --- | --- |
-| 407, 409–411, 413, 414, 418, 425 | tar 6.2.1 in Zapier | Pulled by cacache, node-gyp, and pacote under `@npmcli/arborist`, which yeoman-environment 4.4.3 uses to install generator packages. Raising yeoman-environment to 6.0.1 removes arborist. tar now resolves 7.5.22. |
+| 407, 409–411, 413, 414, 418, 425 | tar 6.2.1 in Zapier | Pulled by cacache, node-gyp, and pacote under `@npmcli/arborist`, which yeoman-environment 4.4.3 uses to install generator packages. yeoman-environment 6.0.1 still reaches arborist through fly-import, now at arborist 9.9.3, pacote 21.5.1, and node-gyp 12.4.0. The upgraded chain selects tar 7.5.22. |
 | 419, 420 | sigstore 2.3.1 and @sigstore/core 1.1.0 in Zapier | Same pacote chain. They now resolve 4.1.1 and 3.2.1. |
 | 416 | yeoman-environment 4.4.3 in Zapier | zapier-platform-cli 19.2.1, the latest release, pins it exactly. Override it to 6.0.1 for that CLI. |
 | 421, 428–430, 434 | adm-zip 0.5.16 in Zapier | The CLI pins it exactly. Override it to 0.6.1. Alert 428 lists no patched version, but its range ends at 0.6.0, so 0.6.1 is outside it. |
-| 406, 417 | tmp 0.2.5 and 0.0.33 in Zapier | The CLI pins 0.2.5. Override it to 0.2.7. external-editor's 0.0.33 left with the yeoman-environment upgrade. |
+| 406, 417 | tmp 0.2.5 and 0.0.33 in Zapier | The CLI pins 0.2.5, and inquirer's external-editor 3.1.0 asks for `^0.0.33`. The override is scoped to the CLI, so it applies to the CLI's whole subtree and both resolve 0.2.7. external-editor still creates and cleans up its temp file with 0.2.7. |
 | 437–440 | simple-git 3.36.0 and @simple-git/argv-parser 1.1.1 in Zapier | yeoman-generator 7.5.1 asks for `^3.20.0` to read git user config. Override it to `^4.0.2`, which brings argv-parser 2.0.1. |
 | 412, 415 | serialize-javascript 6.0.2 in Zapier | Pulled by mocha 10. Raise mocha to `^12.0.3`, which resolves 7.1.2. |
-| 436 | postcss-selector-parser 6.1.5 in Zapier | Pulled by `@npmcli/query` under arborist. It now resolves 7.1.7. |
+| 436 | postcss-selector-parser 6.1.5 in Zapier | Pulled by `@npmcli/query` under arborist. arborist 9.9.3 uses query 5, which selects 7.1.7. |
 | 397, 401, 402 | markdown-it 14.3.1 in root | markdownlint-cli2 pulls it in, and the root override pins it. Raise the override to 14.3.3. |
 | 396 | hono 4.13.7 in Umami runtime | Prisma's dev server pulls it in, and the pnpm override pins it. Raise the override to 4.13.13 and regenerate with pnpm 10.15.1. |
 
