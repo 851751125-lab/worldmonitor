@@ -748,6 +748,8 @@ describe('internal links never redirect or 404 (#8603)', () => {
       ['/countries/norway', /slashless form of a slash-normalised corpus route/],
       ['/countries/not-a-country/', /resolves to no published route \(404\)/],
       ['/docs/not-a-page', /resolves to no published route \(404\)/],
+      ['/docs/roadmap-pro', /resolves to no published route \(404\)/],
+      ['/docs/architecture/pizzint-history', /resolves to no published route \(404\)/],
     ];
     for (const [href, expected] of cases) {
       const reasons = reasonFor(href);
@@ -769,6 +771,8 @@ describe('internal links never redirect or 404 (#8603)', () => {
       'https://tech.worldmonitor.app/?mode=agent',
       '/countries/norway/',
       '/docs/algorithms',
+      '/docs/cross-border-movements',
+      '/docs/architecture',
       '/docs/corrections',
       '/docs/api-reference/supplychainservice/listfuelshortages',
       '/blog/glossary/suez-canal/',
