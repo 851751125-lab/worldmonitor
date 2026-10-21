@@ -44,14 +44,17 @@ const NOW = Date.now();
 const MIN = 60_000;
 
 let writes: Array<{ key: string; value: string }> = [];
+let reads: string[] = [];
 
 function stubRedis(stored: Record<string, string> = {}): void {
   writes = [];
+  reads = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
     if (url.origin !== UPSTASH) throw new Error(`unexpected fetch: ${url}`);
     if (url.pathname.startsWith('/get/')) {
       const key = decodeURIComponent(url.pathname.slice('/get/'.length));
+      reads.push(key);
       return Response.json({ result: stored[key] ?? null });
     }
     const body = JSON.parse(String(init.body ?? '[]'));
@@ -64,7 +67,7 @@ function stubRedis(stored: Record<string, string> = {}): void {
 }
 
 /**
- * The fixture production had for months: UCDP, news, cyber and military
+ * The fixture production had for months: UCDP, news and military
  * alive, no realtime conflict feed. The strike feed is off by default
  * (IRAN_EVENTS_ENABLED), so it reports not_configured beside ACLED.
  */
@@ -73,7 +76,6 @@ function liveFeedsWithoutRealtimeConflict(): Record<string, string> {
   return {
     'conflict:ucdp-events:v1': JSON.stringify({ events }),
     'news:insights:v1': JSON.stringify({ topStories: [{ countryCode: 'UA', threatLevel: 'critical', primaryTitle: 'Strikes on Kyiv' }] }),
-    'cyber:threats-bootstrap:v2': JSON.stringify({ threats: [{ country: 'US', severity: 'CRITICALITY_LEVEL_HIGH' }] }),
     'intelligence:military-cii:v1': JSON.stringify({ byCountry: { UA: { ownFlights: 4, foreignFlights: 2 } } }),
   };
 }
@@ -124,7 +126,7 @@ describe('CII input health, producer to verdict', () => {
     assert.equal(meta.inputs.acled.state, 'not_configured');
     assert.equal(meta.inputs.gdeltCountryEvents.state, 'missing');
     assert.equal(meta.inputs.ucdp.state, 'live');
-    assert.equal(meta.recordCount, 3, 'the UCDP floor still satisfies the old signal-density count');
+    assert.equal(meta.recordCount, 2, 'UCDP and news satisfy the v14 signal-density count');
 
     const entry = riskScoresHealth(meta);
     assert.equal(entry.status, 'COVERAGE_DEGRADED');
@@ -159,23 +161,36 @@ describe('CII input health, producer to verdict', () => {
   });
 
   it('reports a feed that is present but scores nothing as quiet, and carries its quiet clock forward', async () => {
-    const quietCyber = JSON.stringify({ threats: [] });
-    const first = await buildSeedMeta({ ...liveFeedsWithoutRealtimeConflict(), 'cyber:threats-bootstrap:v2': quietCyber });
-    assert.equal(first.inputs.cyber.state, 'quiet');
-    assert.equal(typeof first.inputs.cyber.quietSince, 'number');
+    const quietNews = JSON.stringify({ topStories: [] });
+    const first = await buildSeedMeta({ ...liveFeedsWithoutRealtimeConflict(), 'news:insights:v1': quietNews });
+    assert.equal(first.inputs.newsInsights.state, 'quiet');
+    assert.equal(typeof first.inputs.newsInsights.quietSince, 'number');
 
     const since = NOW - 90 * MIN;
-    const previous = { ...first, inputs: { ...first.inputs, cyber: { state: 'quiet', quietSince: since } } };
+    const previous = { ...first, inputs: { ...first.inputs, newsInsights: { state: 'quiet', quietSince: since } } };
     const second = await buildSeedMeta({
       ...liveFeedsWithoutRealtimeConflict(),
-      'cyber:threats-bootstrap:v2': quietCyber,
+      'news:insights:v1': quietNews,
       [SEED_META_KEY]: JSON.stringify(previous),
     });
-    assert.equal(second.inputs.cyber.quietSince, since, 'a still-quiet input keeps the clock it started');
+    assert.equal(second.inputs.newsInsights.quietSince, since, 'a still-quiet input keeps the clock it started');
 
     const live = await buildSeedMeta({ ...liveFeedsWithoutRealtimeConflict(), [SEED_META_KEY]: JSON.stringify(previous) });
-    assert.equal(live.inputs.cyber.state, 'live');
-    assert.equal(live.inputs.cyber.quietSince, undefined, 'a live input resets the clock');
+    assert.equal(live.inputs.newsInsights.state, 'live');
+    assert.equal(live.inputs.newsInsights.quietSince, undefined, 'a live input resets the clock');
+  });
+
+  it('does not read or grade the cyber feed removed from CII v14', async () => {
+    const meta = await buildSeedMeta(liveFeedsWithoutRealtimeConflict());
+    assert.equal(reads.includes('cyber:threats-bootstrap:v2'), false);
+    assert.equal(Object.hasOwn(meta.inputs, 'cyber'), false);
+    assert.equal(Object.hasOwn(CII_INPUT_POLICY.inputs, 'cyber'), false);
+    assert.equal(Object.hasOwn(CII_INPUT_POLICY.families, 'cyber'), false);
+    const inputs = Object.fromEntries(CII_HEALTH_INPUT_IDS.map((id) => [id, { state: 'live' }]));
+    const entry = riskScoresHealth({ fetchedAt: NOW, recordCount: 2, inputs });
+    assert.equal(entry.status, 'OK');
+    assert.deepEqual(entry.ciiInputs.dead, []);
+    assert.deepEqual(entry.ciiInputs.unfedFamilies, []);
   });
 
   it('reports every input the policy grades, and nothing else', () => {
@@ -190,18 +205,18 @@ describe('assessCiiInputs', () => {
   const allLive = () => Object.fromEntries(CII_HEALTH_INPUT_IDS.map((id) => [id, { state: 'live' }]));
 
   it('quiet but fresh is not dead', () => {
-    const inputs = { ...allLive(), cyber: { state: 'quiet', quietSince: NOW - 30 * MIN } };
+    const inputs = { ...allLive(), newsInsights: { state: 'quiet', quietSince: NOW - 30 * MIN } };
     const result = assessCiiInputs({ inputs }, NOW);
     assert.equal(result.valid, true);
     assert.deepEqual(result.dead, []);
   });
 
   it('quiet past its budget is dead, and a family with nothing else is unfed', () => {
-    const budget = CII_INPUT_POLICY.inputs.cyber.maxQuietMin;
-    const inputs = { ...allLive(), cyber: { state: 'quiet', quietSince: NOW - (budget + 1) * MIN } };
+    const budget = CII_INPUT_POLICY.inputs.newsInsights.maxQuietMin;
+    const inputs = { ...allLive(), newsInsights: { state: 'quiet', quietSince: NOW - (budget + 1) * MIN }, threatSummary: { state: 'missing' } };
     const result = assessCiiInputs({ inputs }, NOW);
-    assert.deepEqual(result.dead, [{ id: 'cyber', state: 'quiet', quietMin: budget + 1 }]);
-    assert.deepEqual(result.unfedFamilies, ['cyber']);
+    assert.deepEqual(result.dead, [{ id: 'newsInsights', state: 'quiet', quietMin: budget + 1 }, { id: 'threatSummary', state: 'missing' }]);
+    assert.deepEqual(result.unfedFamilies, ['information']);
   });
 
   it('an input whose quiet is plausible indefinitely never goes dead', () => {
@@ -218,15 +233,15 @@ describe('assessCiiInputs', () => {
   });
 
   it('a quiet input without a usable clock fails closed', () => {
-    const inputs = { ...allLive(), cyber: { state: 'quiet' } };
-    assert.deepEqual(assessCiiInputs({ inputs }, NOW).dead.map((input: { id: string }) => input.id), ['cyber']);
-    const farFuture = { ...allLive(), cyber: { state: 'quiet', quietSince: NOW + 60 * MIN } };
-    assert.deepEqual(assessCiiInputs({ inputs: farFuture }, NOW).dead.map((input: { id: string }) => input.id), ['cyber']);
+    const inputs = { ...allLive(), newsInsights: { state: 'quiet' } };
+    assert.deepEqual(assessCiiInputs({ inputs }, NOW).dead.map((input: { id: string }) => input.id), ['newsInsights']);
+    const farFuture = { ...allLive(), newsInsights: { state: 'quiet', quietSince: NOW + 60 * MIN } };
+    assert.deepEqual(assessCiiInputs({ inputs: farFuture }, NOW).dead.map((input: { id: string }) => input.id), ['newsInsights']);
   });
 
   it('a quiet clock a little ahead of the reader is clock skew, not a fault', () => {
     // The producer stamps quietSince with its own clock; another instance reads it.
-    const inputs = { ...allLive(), cyber: { state: 'quiet', quietSince: NOW + 2_000 } };
+    const inputs = { ...allLive(), newsInsights: { state: 'quiet', quietSince: NOW + 2_000 } };
     assert.deepEqual(assessCiiInputs({ inputs }, NOW).dead, []);
   });
 
@@ -240,20 +255,20 @@ describe('assessCiiInputs', () => {
   });
 
   it('a source check past its own staleness budget makes the input stale', () => {
-    const result = assessCiiInputs({ inputs: allLive() }, NOW, { gdeltCountryEvents: 'STALE_SEED', cyber: 'OK' });
+    const result = assessCiiInputs({ inputs: allLive() }, NOW, { gdeltCountryEvents: 'STALE_SEED', newsInsights: 'OK' });
     assert.deepEqual(result.dead, [{ id: 'gdeltCountryEvents', state: 'stale', sourceCheck: 'gdeltCountryEvents' }]);
   });
 
   it('seed-meta without an inputs block cannot prove anything', () => {
     assert.equal(assessCiiInputs({ fetchedAt: NOW, recordCount: 3 }, NOW).valid, false);
     assert.equal(assessCiiInputs(null, NOW).valid, false);
-    assert.equal(assessCiiInputs({ inputs: { ...allLive(), cyber: { state: 'bogus' } } }, NOW).dead[0].state, 'unreported');
+    assert.equal(assessCiiInputs({ inputs: { ...allLive(), newsInsights: { state: 'bogus' } } }, NOW).dead[0].state, 'unreported');
   });
 });
 
 describe('composeRiskScoresInputHealth', () => {
   const allLive = () => Object.fromEntries(CII_HEALTH_INPUT_IDS.map((id) => [id, { state: 'live' }]));
-  const meta = (inputs: unknown, over: Record<string, unknown> = {}) => ({ fetchedAt: NOW - MIN, recordCount: 3, inputs, ...over });
+  const meta = (inputs: unknown, over: Record<string, unknown> = {}) => ({ fetchedAt: NOW - MIN, recordCount: 2, inputs, ...over });
 
   it('all inputs live stays OK and still shows the per-input states', () => {
     const entry = riskScoresHealth(meta(allLive()));
@@ -306,7 +321,7 @@ describe('composeRiskScoresInputHealth', () => {
   });
 
   it('a signal-density shortfall with every input healthy stays containable, as before', () => {
-    const raw = JSON.stringify(meta(allLive(), { recordCount: 2 }));
+    const raw = JSON.stringify(meta(allLive(), { recordCount: 1 }));
     const ctx = {
       containmentEvidenceByName: new Map(),
       keyStrens: new Map([[BOOTSTRAP_KEYS.riskScores, 4096]]),
@@ -396,7 +411,7 @@ describe('/api/seed-health intelligence:risk-scores', () => {
 
   it('stays ok when every input is live', async () => {
     const inputs = Object.fromEntries(CII_HEALTH_INPUT_IDS.map((id) => [id, { state: 'live' }]));
-    const entry = await seedHealthEntry({ fetchedAt: Date.now(), recordCount: 3, inputs });
+    const entry = await seedHealthEntry({ fetchedAt: Date.now(), recordCount: 2, inputs });
     assert.equal(entry.status, 'ok');
     assert.deepEqual(entry.ciiInputs.dead, []);
   });

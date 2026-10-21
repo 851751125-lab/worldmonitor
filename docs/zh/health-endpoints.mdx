@@ -110,8 +110,8 @@ consumer-prices-core 服务会将每个市场的抓取覆盖率快照写入 `con
 - **流离失所：** `displacement`（当前 UTC 年）-> `displacementPrev`（上一年，覆盖新年种子运行之前的 1 月 1 日窗口）
 
 `riskScores` 有意比原始订阅源心跳更严格。其
-`recordCount` 是实时信号密度覆盖：CII 刷新期间存在的与评分相关的 Tier-1 冲突、新闻和网络信号系列的数量。
-冲突系列可由 ACLED 路径、UCDP 事件订阅源满足；当 ACLED 路径不返回事件时，Tier-1 国家在 `gdelt:bulk:country-events:v1` 中的实时 GDELT 快照（新鲜，且基线与当前窗口完整，或七天窗口就绪）也可满足，与 CII v13 评分器匹配。即使其升级与水平分数为 0，GDELT 快照也计入。当这些订阅源可达但安静时，`riskScores` 仍可报告
+`recordCount` 是实时信号密度覆盖：CII 刷新期间存在的与评分相关的 Tier-1 冲突与新闻信号系列的数量（网络 IOC 行自 CII v14 起不再计入：它们定位的是攻击者基础设施）。
+冲突系列可由 ACLED 路径、UCDP 事件订阅源满足；当 ACLED 路径不返回事件时，Tier-1 国家在 `gdelt:bulk:country-events:v1` 中的实时 GDELT 快照（新鲜，且基线与当前窗口完整，或七天窗口就绪）也可满足，与 CII v14 评分器匹配。即使其升级与水平分数为 0，GDELT 快照也计入。当这些订阅源可达但安静时，`riskScores` 仍可报告
 `COVERAGE_PARTIAL`；底层订阅源的新鲜度由订阅源特定健康条目跟踪，这些订阅源在这些条目中发布种子元数据。
 
 该计数无法发现失效的输入。ACLED 凭据约在 2026 年 7 月丢失，此后数月内所有国家的动荡与冲突分量均为 0，
@@ -141,7 +141,7 @@ OREF 历史键缺失视为安静，因为中继仅在警报变化时写入。`no
 | 某个输入失效，但所有系列仍有输入 | `COVERAGE_PARTIAL` |
 
 系列包括 `conflict`（ACLED 与 GDELT 国家事件，即动荡与冲突背后的实时订阅源；UCDP 是年度下限，不能替代它们）、
-`information`（新闻洞察与威胁摘要）、`security`（军事活动、GPS 干扰与航空）以及 `cyber`。这些判定只会提升
+`information`（新闻洞察与威胁摘要）以及 `security`（军事活动、GPS 干扰与航空）。这些判定只会提升
 `OK` 或 `COVERAGE_PARTIAL` 结果，并且永远不会因已提供的负载而被抑制：负载存在，但其分数缺少一个信号。`ciiInputs` 仅对运营者可见：匿名的 `?compact=1` 响应保留状态并移除该块。
 `/api/seed-health` 对 `intelligence:risk-scores` 评估同一报告，报告 `coverage_partial` 并附带相同的
 `ciiInputs` 块，但不含同级过期检查。

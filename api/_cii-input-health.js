@@ -34,7 +34,6 @@ const INPUTS = {
   oref:               { maxQuietMin: null, sourceCheck: null, missingIsQuiet: true },
   outages:            { maxQuietMin: null, sourceCheck: 'outages' },
   climate:            { maxQuietMin: null, sourceCheck: 'climateAnomalies' },
-  cyber:              { maxQuietMin: 720, sourceCheck: 'cyberThreats' },
   fires:              { maxQuietMin: 1440, sourceCheck: 'wildfires' },
   gpsjam:             { maxQuietMin: 720, sourceCheck: 'gpsjam' },
   advisories:         { maxQuietMin: 1440, sourceCheck: null },
@@ -57,7 +56,6 @@ const FAMILIES = {
   conflict: ['acled', 'gdeltCountryEvents'],
   information: ['newsInsights', 'threatSummary'],
   security: ['militaryCii', 'gpsjam', 'aviation'],
-  cyber: ['cyber'],
 };
 
 export const CII_INPUT_POLICY = Object.freeze({
