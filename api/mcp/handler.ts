@@ -131,8 +131,8 @@ type JsonRpcRequest = {
   params?: unknown;
 };
 
-function validJsonRpcId(id: unknown): id is string | number | null | undefined {
-  if (id === null || id === undefined) return true;
+function validJsonRpcId(id: unknown): id is string | number | undefined {
+  if (id === undefined) return true;
   return safeJsonRpcId(id) !== null;
 }
 
@@ -997,6 +997,11 @@ async function mcpHandlerInner(
     return rpcError(body.id ?? null, -32600, 'Invalid request: missing method', corsHeaders);
   }
 
+  if (body.params !== undefined && (body.params === null || typeof body.params !== 'object' || Array.isArray(body.params))) {
+    usage.phase = 'malformed';
+    return rpcError(body.id ?? null, -32600, 'Invalid request: params must be an object', corsHeaders, undefined, body.id === undefined ? 400 : 200);
+  }
+
   const { id, method } = body;
 
   // #8403 — attribute JSON-RPC method (and registry-bounded tool name) before
@@ -1014,6 +1019,15 @@ async function mcpHandlerInner(
     return id === undefined
       ? new Response(null, { status: 410, headers: mcpMigrationHeaders(corsHeaders) })
       : mcpAliasRpcError(id, corsHeaders);
+  }
+
+  if (id === undefined) {
+    const limited = await applyAnonDiscoveryLimit(req, corsHeaders);
+    if (limited) {
+      usage.phase = 'limit';
+      return new Response(null, { status: 429, headers: limited.headers });
+    }
+    return new Response(null, { status: 202, headers: withMcpNoStore(corsHeaders) });
   }
 
   // Connect-time challenge. An unauthenticated `initialize` on the transport is
