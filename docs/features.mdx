@@ -45,6 +45,9 @@ Layers are organized into logical groups for efficient monitoring:
 | **Hotspots** | Intelligence hotspots with activity levels based on news correlation |
 | **Sanctions** | Countries under economic sanctions regimes |
 | **Protests** | Live social unrest events from ACLED and GDELT |
+| **Armed Conflict Events** | UCDP georeferenced events, coloured by violence type and sized by deaths. Refreshed every 6 hours. Off by default |
+| **Middle East Strikes** | Strike reports from Telegram channels, classified and geocoded, with a GDELT backstop that requires multi-source reporting. State-media claims from a belligerent appear only when an independent source corroborates them within 2 hours. Shown only on deployments built with `VITE_ENABLE_IRAN_ATTACKS=true` and served with `IRAN_EVENTS_ENABLED=true`; Pro-only on desktop |
+| **Cyber Threats** | Threat-intelligence indicators by country, with severity. Shown only on deployments built with `VITE_ENABLE_CYBER_LAYER=true`. Off by default |
 
 **Military & Strategic**
 | Layer | Description |
@@ -69,8 +72,16 @@ Layers are organized into logical groups for efficient monitoring:
 |-------|-------------|
 | **Ships (AIS)** | Live vessel tracking via AIS with chokepoint monitoring and the strategic-port registry* |
 | **Delays** | FAA airport delay status and ground stops |
+| **Aircraft emergencies** | Aircraft squawking 7500 (unlawful interference), 7600 (radio failure), or 7700 (general emergency) on adsb.lol, polled every 60 seconds. A marker appears only when the last message is at most 120 seconds old and the position at most 90 seconds old; older reports stay in the list for up to 15 minutes after the last observation. An aircraft that stops reporting becomes "unknown", never "resolved". Receiver coverage is incomplete. Flat map only. Off by default |
+| **Live Tanker Positions** | Tankers near six major chokepoints, from AIS. Energy variant only; see [Energy Monitor](/overview#energy-monitor) |
 
 *\*AIS data via [AISStream.io](https://aisstream.io) uses terrestrial receivers with stronger coverage in European/Atlantic waters. Middle East, Asia, and open ocean coverage is limited. Satellite AIS providers (Spire, Kpler) offer global coverage but require commercial licenses.*
+
+**Canada**
+| Layer | Description |
+|-------|-------------|
+| **Canada Roads** | Road closures and incidents from Ontario, Alberta, and Manitoba 511, Toronto road restrictions, and DriveBC (Open511). Provinces whose API key is not configured keep their last good data. Off by default because the payload is large |
+| **Canada Alerts** | Public emergency alerts from Alberta Emergency Alert, B.C. Evacuation Orders, and SaskAlert, refreshed every 15 minutes. Polygons are drawn at their centroid. Ontario is not covered. On by default on desktop in the geopolitical variant |
 
 **Natural Events**
 | Layer | Description |
