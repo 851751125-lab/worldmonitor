@@ -125,6 +125,12 @@ function countryPayload() {
           todayTotal: 0,
           todayCountsAvailable: true,
           wowChangePct: 0,
+          officialLatestDate: '2026-10-18',
+          officialLatestTotal: 0,
+          officialAvg7d: 0,
+          baselineAvgDaily: 87.4,
+          baselineFrom: '2024-10-22',
+          baselineTo: '2025-10-21',
         },
       })),
     };
@@ -558,14 +564,20 @@ describe('freeze crawlable live pulse coverage gates', () => {
     );
   });
 
-  it('preserves explicit transit-count availability in the frozen snapshot', async () => {
+  it('freezes the official IMF PortWatch figures, including a measured zero, and no relay transit count', async () => {
     stubFetch();
     const { snapshot } = await runFreeze();
     assert.ok(Object.values(snapshot.chokepoints).length > 0);
     assert.ok(
       Object.values(snapshot.chokepoints).every((pulse) => (
-        pulse.todayTransits === '0'
-        && pulse.todayCountsAvailable === true
+        pulse.officialLatestDate === '2026-10-18'
+        && pulse.officialLatestTotal === 0
+        && pulse.officialAvg7d === 0
+        && pulse.baselineAvgDaily === 87.4
+        && pulse.baselineFrom === '2024-10-22'
+        && pulse.baselineTo === '2025-10-21'
+        && !('todayTransits' in pulse)
+        && !('todayCountsAvailable' in pulse)
         && pulse.navigationalWarnings === '0 warnings'
         && pulse.navigationalWarningsAvailable === true
         && pulse.aisDisruptions === '0 AIS disruptions'

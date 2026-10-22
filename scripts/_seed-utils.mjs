@@ -2860,9 +2860,12 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     );
   }
   let data;
+  // Absolute wall-clock deadline of the fetch race, for fetchers with optional
+  // work that must stop in time to publish what they already have.
+  const fetchDeadlineAtMs = Date.now() + fetchDeadlineMs;
   try {
     data = await raceFetchDeadline(
-      withRetry(() => fetchFn({ runStartedAtMs: startMs })),
+      withRetry(() => fetchFn({ runStartedAtMs: startMs, fetchDeadlineAtMs })),
       fetchDeadlineMs,
       `${domain}:${resource}`,
     );

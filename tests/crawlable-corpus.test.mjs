@@ -77,6 +77,7 @@ import {
   chokepointEvidenceNarrative,
   MAX_FUTURE_SKEW_MS,
   MAX_LIVE_SNAPSHOT_AGE_MS,
+  chokepointOfficialMetrics,
 } from '../scripts/crawlable-live-tools.mjs';
 import {
   CHOKEPOINT_CONTENT,
@@ -244,9 +245,21 @@ function assertPulseFixtureShape(fixture, live) {
             disruptionScore: 'string', status: 'string', congestion: 'string|null',
             navigationalWarnings: 'string|null', navigationalWarningsAvailable: 'boolean',
             aisDisruptions: 'string|null', aisSnapshotAvailable: 'boolean', description: 'string|null',
-            todayTransits: 'string|null', todayCountsAvailable: 'boolean', weekMovement: 'string|null',
+            weekMovement: 'string|null',
             partial: 'boolean', asOf: 'string',
-          }, `chokepoints.${id}`);
+          }, `chokepoints.${id}`, {
+            // IMF PortWatch official figures; null is withheld. Optional only
+            // because freezes before they existed carry the legacy relay AIS
+            // count instead, which the page never renders. The freeze suite
+            // pins that a new capture carries the official fields.
+            officialLatestDate: 'string|null', officialLatestTotal: 'number|null', officialAvg7d: 'number|null',
+            baselineAvgDaily: 'number|null', baselineFrom: 'string|null', baselineTo: 'string|null',
+            todayTransits: 'string|null', todayCountsAvailable: 'boolean',
+          });
+          assert.ok(
+            'officialLatestTotal' in record || 'todayTransits' in record,
+            `chokepoints.${id} must carry either the PortWatch figures or the legacy relay count`,
+          );
         }
       }
       continue;
@@ -4166,13 +4179,13 @@ describe('crawlable corpus generator', () => {
       )?.acceptedAnswer?.text;
       assert.match(
         sparseMetricsAnswer,
-        /The daily transit count and PortWatch week-over-week movement each depend on their own source availability/,
-        'the hub FAQ must describe transit-count and PortWatch movement availability independently',
+        /The latest daily transit count, its 7-day average and the week-over-week movement are IMF PortWatch figures and are withheld together when PortWatch has no history for the waterway; the year-earlier comparison is omitted when no baseline was stored/,
+        'the hub FAQ must describe the PortWatch figures as one source and the baseline comparison as separately omittable',
       );
       assert.doesNotMatch(
         sparseMetricsAnswer,
-        /every transit-derived value[^.]+is withheld when the day's transit count is unavailable/,
-        'the hub FAQ must not claim PortWatch movement depends on the daily transit count',
+        /each depend on their own source availability|either can appear without the other/,
+        'the hub FAQ must not describe the daily count and the movement as independent sources now that both are PortWatch',
       );
       assert.match(
         sparseMetricsAnswer,
@@ -4554,7 +4567,7 @@ describe('crawlable corpus generator', () => {
       );
       assert.match(
         hormuzDriver,
-        /Observed score inputs: .+\. Context only \(not score inputs\): AIS event count (?:\(.+\)|unavailable); transit count (?:\(.+\)|unavailable)\.$/,
+        /Observed score inputs: .+\. Context only \(not score inputs\): AIS event count (?:\(.+\)|unavailable); IMF PortWatch latest daily count (?:\(.+\)|unavailable)\.$/,
       );
       assert.doesNotMatch(hormuz, /data-chokepoint-status-mapping/);
       assert.ok(hormuz.includes(liveScriptTag), 'chokepoint live script must match the production CSP nonce');
@@ -4564,41 +4577,47 @@ describe('crawlable corpus generator', () => {
       assert.doesNotMatch(hormuz, /data-chokepoint-band>Loading/);
       assert.match(hormuz, /<time data-live-updated datetime="20\d{2}-\d{2}-\d{2}T/);
       assert.match(hormuz, /data-chokepoint-score>\d/);
-      // #7457: a frozen pulse once stored todayTransits "0" with a non-zero
-      // WoW for Hormuz. That 0 is an AIS-window zero-fill, not a measurement,
-      // so the page withholds the count. Which branch Hormuz is on follows the
-      // committed pulse (#9115); the per-chokepoint loop below holds every
-      // page to its own flags.
+      // The page headlines the IMF PortWatch official daily count (2026-10-22:
+      // the relay's AIS zone-exit count reached the page as "38 transits"
+      // against PortWatch's 4). Which branch Hormuz is on follows the committed
+      // pulse; a freeze from before the fields existed withholds the figures.
+      // The per-chokepoint loop below holds every page to its own record.
       const hormuzDocument = htmlDocument(
         hormuz,
         'https://www.worldmonitor.app/chokepoints/strait-of-hormuz/',
       );
-      const hormuzTransitsNote = hormuzDocument.querySelector('[data-chokepoint-transits-note]');
       // The generator's own publish-or-withhold rule and label formatting.
-      const hormuzTransitsLabel = chokepointCoverageMetrics({
-        todayTransits: hormuzPulse.todayTransits,
-        todayCountsAvailable: hormuzPulse.todayCountsAvailable,
-      }).todayTransits;
-      if (hormuzTransitsLabel != null) {
-        assert.ok(hormuz.includes(`data-chokepoint-transits>${hormuzTransitsLabel}<`), `Hormuz must publish its count ${hormuzTransitsLabel}`);
-        assert.doesNotMatch(hormuz, /World Monitor is not currently publishing a transit count for Strait of Hormuz/);
-        assert.equal(hormuzTransitsNote.hidden, true, 'a published count carries no withhold note');
+      const hormuzOfficial = chokepointOfficialMetrics(hormuzPulse);
+      if (hormuzOfficial.latestTransits != null) {
+        assert.ok(
+          hormuz.includes(`data-chokepoint-official-transits>${hormuzOfficial.latestTransits}</span><small data-chokepoint-official-date>${hormuzOfficial.latestDate}<`),
+          `Hormuz must publish the official count ${hormuzOfficial.latestTransits} with its date`,
+        );
+        assert.ok(hormuz.includes(`data-chokepoint-official-average>${hormuzOfficial.average}<`));
+        assert.match(hormuz, /IMF PortWatch counted \d[\d,]* transits? (?:through the Strait of Hormuz )?on /);
       } else {
-        assert.match(hormuz, /data-chokepoint-transits>—/);
+        assert.match(hormuz, /data-chokepoint-official-transits>—</);
         assert.doesNotMatch(
           hormuz,
-          /data-chokepoint-transits>0</,
-          'absent-feed chokepoint must not render a numeric 0 transit count',
+          /data-chokepoint-official-transits>0</,
+          'a chokepoint without a published PortWatch day must not render a numeric 0',
         );
-        assert.match(
-          hormuz,
-          /World Monitor is not currently publishing a transit count for Strait of Hormuz for this period/,
-        );
-        assert.match(hormuzTransitsNote.textContent,
-          /Not measured here in this snapshot.*matched AIS entry and exit reports/);
+        assert.match(hormuz, /data-chokepoint-official-average>—</);
+        assert.match(hormuz, /No IMF PortWatch daily transit count is published for this snapshot/);
       }
-      assert.match(hormuzDocument.querySelector('[data-live-chokepoint]').dataset.transitMeasurementNote,
-        /Historical PortWatch totals/);
+      assert.match(hormuz, /Daily transit counts are official IMF PortWatch figures/, 'the source is attributed by name');
+      assert.doesNotMatch(
+        hormuz,
+        /Today's transits|data-chokepoint-transits\b|data-transit-measurement-note|observed transit count|not currently publishing a transit count|Transit counts require observed AIS crossings/,
+        'the relay AIS count and its framing must not reach the page',
+      );
+      if (hormuzPulse.todayTransits != null) {
+        assert.doesNotMatch(
+          hormuz,
+          new RegExp(`>\\s*${String(hormuzPulse.todayTransits).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*<`),
+          'a legacy relay count in the frozen record must not be rendered',
+        );
+      }
       // Visibility follows the pulse's availability flags, not a fixed
       // expectation. This asserted `hidden === true` unconditionally, which was
       // only true while the committed snapshot predated the #7535 flags; the
@@ -4632,12 +4651,7 @@ describe('crawlable corpus generator', () => {
       assert.doesNotMatch(
         hormuz,
         /AIS-derived feed has no data/,
-        'the withhold note must not name AIS -- dataAvailable is PortWatch presence, so the count can be withheld while AIS is healthy',
-      );
-      assert.doesNotMatch(
-        hormuz,
-        /data-chokepoint-transits>0[\s\S]{0,400}data-chokepoint-movement>\+12\.9%/,
-        'a page cannot show 0 transits and a non-zero WoW change together',
+        'the withhold wording must not name AIS -- dataAvailable is PortWatch presence, so the count can be withheld while AIS is healthy',
       );
       // Operator-facing review-hygiene text must never reach crawlable HTML.
       assert.doesNotMatch(
@@ -4846,8 +4860,9 @@ describe('crawlable corpus generator', () => {
         );
         const document = htmlDocument(page, `https://www.worldmonitor.app/chokepoints/${meta.slug}/`);
         const passageText = document.querySelector('[data-chokepoint-open-status]')?.textContent ?? '';
-        const asOfText = passageText.match(/^As of (.*), (?:source coverage|the observed transit count)/)?.[1];
+        const asOfText = passageText.match(/^As of (.*), (?:source coverage|IMF PortWatch counted|no IMF PortWatch daily transit count)/)?.[1];
         assert.ok(asOfText, `${meta.name} passage evidence must carry an as-of timestamp`);
+        const official = chokepointOfficialMetrics(pulse);
         const expectedNarrative = chokepointEvidenceNarrative({
           displayName: meta.name,
           score: pulse.disruptionScore,
@@ -4855,7 +4870,7 @@ describe('crawlable corpus generator', () => {
           description: pulse.description,
           asOfText,
           partial: pulse.partial === true
-            || pulse.todayTransits == null
+            || official.latestTransits == null
             || pulse.navigationalWarningsAvailable !== true
             || pulse.aisSnapshotAvailable !== true,
           warningsLabel: pulse.navigationalWarningsAvailable === true
@@ -4863,7 +4878,12 @@ describe('crawlable corpus generator', () => {
             : null,
           congestionLabel: pulse.aisSnapshotAvailable === true ? pulse.congestion : null,
           aisEventCountLabel: pulse.aisSnapshotAvailable === true ? pulse.aisDisruptions : null,
-          todayTransits: pulse.todayTransits,
+          officialLatestDate: pulse.officialLatestDate,
+          officialLatestTotal: pulse.officialLatestTotal,
+          officialAvg7d: pulse.officialAvg7d,
+          baselineAvgDaily: pulse.baselineAvgDaily,
+          baselineFrom: pulse.baselineFrom,
+          baselineTo: pulse.baselineTo,
         });
         assert.equal(passageText, expectedNarrative.passage, `${meta.name} must use the shared passage policy`);
         assert.equal(
@@ -4874,8 +4894,13 @@ describe('crawlable corpus generator', () => {
         if (expectedNarrative.passage.includes('source coverage')) {
           assert.match(passageText, /cannot verify operational passage status/);
         } else {
-          assert.match(passageText, /observed transit count/);
+          assert.match(passageText, /IMF PortWatch counted \d/);
           assert.match(passageText, /does not verify unrestricted passage or operational closure/);
+        }
+        if (official.baselineShare !== null) {
+          assert.match(passageText, new RegExp(`${official.baselineShare} of the ${official.baselineAverage}-a-day average for `));
+        } else {
+          assert.doesNotMatch(passageText, /a-day average for/, `${meta.name} must not invent a baseline comparison`);
         }
         assert.doesNotMatch(
           passageText,
@@ -4899,37 +4924,42 @@ describe('crawlable corpus generator', () => {
           /Configured geopolitical baseline: Traffic down/,
           `${meta.name} must not quote the transit anomaly as the threat baseline`,
         );
-        const raw = Number(String(pulse.todayTransits ?? '').replace(/,/g, ''));
-        const noteRe = new RegExp(
-          `World Monitor is not currently publishing a transit count for ${meta.name} for this period`,
-        );
-        const countsAvailable = pulse.todayCountsAvailable ?? (Number.isFinite(raw) && raw >= 1);
-        if (countsAvailable && (raw === 0 || raw >= 1)) {
+        const withheldRe = /No IMF PortWatch daily transit count is published for this snapshot/;
+        if (official.latestTransits != null) {
           publishedCounts++;
-          assert.match(
-            page,
-            new RegExp(`data-chokepoint-transits>${pulse.todayTransits}<`),
-            `${meta.name} has a supplied count of ${pulse.todayTransits} and must publish it`,
+          assert.ok(
+            page.includes(`data-chokepoint-official-transits>${official.latestTransits}</span><small data-chokepoint-official-date>${official.latestDate}<`),
+            `${meta.name} has a published PortWatch day of ${official.latestTransits} and must publish it with its date`,
           );
-          assert.doesNotMatch(page, noteRe, `${meta.name} publishes a count and must not carry the withhold note`);
+          assert.ok(
+            page.includes(`data-chokepoint-official-average>${official.average ?? '—'}<`),
+            `${meta.name} must render the 7-day average exactly as the shared formatter does`,
+          );
+          assert.doesNotMatch(page, withheldRe, `${meta.name} publishes a count and must not carry the withhold sentence`);
           assert.ok(
             page.includes(`data-chokepoint-movement>${pulse.weekMovement ?? 'Unavailable'}<`),
-            `${meta.name} has a supplied count and must keep week movement visible`,
+            `${meta.name} has a published count and must keep week movement visible`,
           );
         } else {
           withheldCounts++;
-          assert.match(page, /data-chokepoint-transits>—/);
+          assert.match(page, /data-chokepoint-official-transits>—</);
           assert.doesNotMatch(
             page,
-            /data-chokepoint-transits>0</,
-            `${meta.name} must not render a numeric 0 for an unsupplied transit count`,
+            /data-chokepoint-official-transits>0</,
+            `${meta.name} must not render a numeric 0 for an unpublished PortWatch day`,
           );
+          assert.match(page, /data-chokepoint-official-average>—</);
           assert.ok(
             page.includes(`data-chokepoint-movement>${pulse.weekMovement ?? '—'}<`),
-            `${meta.name} must keep week movement independent from today's count`,
+            `${meta.name} must keep week movement independent from the latest day`,
           );
-          assert.match(page, noteRe);
+          assert.match(page, withheldRe);
         }
+        assert.doesNotMatch(
+          page,
+          /Today's transits|data-chokepoint-transits\b|observed transit count|not currently publishing a transit count/,
+          `${meta.name} must not present the relay AIS count as transits`,
+        );
         const pageDocument = htmlDocument(page, `https://www.worldmonitor.app/chokepoints/${meta.slug}/`);
         // Each source governs only its own tile, and the tile is hidden exactly
         // when that source is unavailable. This asserted `hidden === true`
@@ -5849,15 +5879,29 @@ describe('live-pulse snapshot injection (#7533)', () => {
     const fixture = JSON.parse(readFileSync(join(repoRoot, FIXTURE_RELATIVE_PATH), 'utf8'));
     const live = structuredClone(fixture);
     const record = Object.values(live.chokepoints)[0];
-    for (const field of ['todayTransits', 'description', 'congestion', 'navigationalWarnings', 'aisDisruptions', 'weekMovement']) {
+    for (const field of [
+      'officialLatestDate', 'officialLatestTotal', 'officialAvg7d', 'baselineAvgDaily', 'baselineFrom', 'baselineTo',
+      'description', 'congestion', 'navigationalWarnings', 'aisDisruptions', 'weekMovement',
+    ]) {
       record[field] = null;
     }
-    record.todayCountsAvailable = false;
     record.navigationalWarningsAvailable = false;
     record.aisSnapshotAvailable = false;
     record.partial = true;
     assert.doesNotThrow(() => assertPulseFixtureShape(fixture, live));
-    delete record.todayTransits;
+    delete record.weekMovement;
+    assert.throws(() => assertPulseFixtureShape(fixture, live), /nested shape/);
+    record.weekMovement = null;
+    // A legacy record carries the relay count instead of the official figures;
+    // one with neither is not a chokepoint pulse at all.
+    for (const field of ['officialLatestDate', 'officialLatestTotal', 'officialAvg7d', 'baselineAvgDaily', 'baselineFrom', 'baselineTo']) {
+      delete record[field];
+    }
+    assert.throws(() => assertPulseFixtureShape(fixture, live), /either the PortWatch figures or the legacy relay count/);
+    record.todayTransits = null;
+    record.todayCountsAvailable = false;
+    assert.doesNotThrow(() => assertPulseFixtureShape(fixture, live));
+    record.officialLatestTotal = '4';
     assert.throws(() => assertPulseFixtureShape(fixture, live), /nested shape/);
   });
 
@@ -7892,7 +7936,10 @@ describe('chokepoint disruption-score methodology', () => {
       warningsLabel: '2 warnings',
       congestionLabel: 'High',
       aisEventCountLabel: '3 AIS disruptions',
-      todayTransits: '6',
+      // Derived, not a literal: this file's calendar-date guard (#7533) only
+      // admits dates taken from the loaded clock or documented in an allowlist.
+      officialLatestDate: new Date(Date.UTC(2026, 7, 31)).toISOString().slice(0, 10),
+      officialLatestTotal: 6,
     });
     for (const { id } of CHOKEPOINT_SCORE_INPUTS) {
       assert.match(

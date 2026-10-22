@@ -115,7 +115,7 @@ const { mergeLastGoodQuotes, planYahooRefresh, resolveMergedQuotesAsOf } = requi
 // ESM module loaded via require(esm) (Node >= 22.12; relay image is node:24).
 // Same implementation the RPC handler scores with — see the module header for
 // why it lives in shared/ rather than beside the other scoring helpers.
-const { detectTrafficAnomaly } = require('../shared/chokepoint-traffic-anomaly.js');
+const { detectTrafficAnomaly, summarizePortwatchHistory } = require('../shared/chokepoint-traffic-anomaly.js');
 const { CHOKEPOINT_THREAT_LEVELS } = require('../shared/chokepoint-threat-levels.js');
 const { classifyVesselType } = require('../shared/ais-vessel-type.js');
 const { readTransitWindow } = require('../shared/chokepoint-transit-window.js');
@@ -10543,6 +10543,10 @@ async function seedTransitSummaries() {
     const threatLevel = CHOKEPOINT_THREAT_LEVELS[cpId] || 'normal';
     const history = cpData?.history ?? [];
     const anomaly = detectTrafficAnomaly(history, threatLevel);
+    // The official IMF PortWatch figures: latest published day, trailing
+    // 7-day mean, and the seeder's year-earlier baseline. Null when PortWatch
+    // has nothing for this chokepoint -- never a zero-fill.
+    const official = summarizePortwatchHistory(history, cpData?.baseline);
 
     // Get relay transit counts for this chokepoint
     let relayTransit = null;
@@ -10575,6 +10579,12 @@ async function seedTransitSummaries() {
       todayCargo: relayTransit?.cargo ?? null,
       todayOther: relayTransit?.other ?? null,
       wowChangePct: cpData?.wowChangePct ?? 0,
+      officialLatestDate: official.latestDate,
+      officialLatestTotal: official.latestTotal,
+      officialAvg7d: official.avg7d,
+      baselineAvgDaily: official.baselineAvgDaily,
+      baselineFrom: official.baselineFrom,
+      baselineTo: official.baselineTo,
       riskLevel: cr?.riskLevel ?? '',
       incidentCount7d: cr?.incidentCount7d ?? 0,
       disruptionPct: cr?.disruptionPct ?? 0,
