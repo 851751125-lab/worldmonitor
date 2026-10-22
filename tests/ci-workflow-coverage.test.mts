@@ -2017,6 +2017,96 @@ describe('CI workflow coverage', () => {
     }
   });
 
+  it('includes every audited npm manifest and lockfile in the sparse checkout', () => {
+    const checkout = YAML.parse(securityAuditWorkflow).jobs['audit-lockfile'].steps[0];
+    assert.equal(checkout.with['sparse-checkout-cone-mode'], false);
+    assert.equal(checkout.with.filter, undefined, 'an explicit filter overrides the checkout action sparse patterns');
+    const paths = new Set(checkout.with['sparse-checkout'].trim().split('\n'));
+    assert.ok(paths.has('/.github/scripts/audit-production-dependencies.mjs'));
+    for (const step of securityAuditSteps()) {
+      for (const option of ['package-json', 'lockfile']) {
+        const path = step.run.match(new RegExp(`--${option} "([^"]+)"`))?.[1];
+        assert.ok(paths.has(`/${path}`), `sparse checkout must include ${path}`);
+      }
+    }
+  });
+
+  it('preserves npm configuration for each sparse audit workspace', () => {
+    const checkout = YAML.parse(securityAuditWorkflow).jobs['audit-lockfile'].steps[0];
+    const paths = new Set(checkout.with['sparse-checkout'].trim().split('\n'));
+    const configs = execFileSync('git', ['ls-files', '--', '.npmrc', '**/.npmrc'], { cwd: root, encoding: 'utf8' })
+      .trim().split('\n').filter(Boolean);
+    const workspaces = new Set(securityAuditLockfiles().map(dirname));
+    for (const config of configs.filter((path) => workspaces.has(dirname(path)))) {
+      assert.ok(paths.has(`/${config}`), `sparse checkout must retain npm configuration ${config}`);
+    }
+  });
+
+  it('includes Rust policy inputs and every local audit helper in the sparse checkout', () => {
+    const checkout = YAML.parse(securityAuditWorkflow).jobs['audit-rust'].steps[0];
+    assert.equal(checkout.with['sparse-checkout-cone-mode'], false);
+    assert.equal(checkout.with.filter, undefined);
+    const paths = new Set(checkout.with['sparse-checkout'].trim().split('\n'));
+    for (const path of ['src-tauri/Cargo.lock', '.github/rust-advisory-decisions.json']) {
+      assert.ok(paths.has(`/${path}`), `sparse checkout must include ${path}`);
+    }
+    const pending = ['.github/scripts/audit-rust-dependencies.mjs'];
+    const visited = new Set<string>();
+    while (pending.length) {
+      const path = pending.pop()!;
+      if (visited.has(path)) continue;
+      visited.add(path);
+      assert.ok(paths.has(`/${path}`), `sparse checkout must include local helper ${path}`);
+      const source = read(resolve(root, path));
+      for (const match of source.matchAll(/(?:import|export)[^;]*?from ['"](\.[^'"]+)['"]/g)) {
+        pending.push(resolve(root, dirname(path), match[1]).slice(root.length + 1));
+      }
+    }
+  });
+
+  it('loads audit modules and reads PR base objects from the configured sparse checkouts', () => {
+    const jobs = YAML.parse(securityAuditWorkflow).jobs;
+    const auditJobs = ['audit-lockfile', 'audit-rust'];
+    const patterns = auditJobs.map((name) => jobs[name].steps[0].with['sparse-checkout'] as string);
+    const dir = mkdtempSync(resolve(tmpdir(), 'wm-sparse-audit-'));
+    const env = { ...process.env };
+    for (const name of execFileSync('git', ['rev-parse', '--local-env-vars'], { cwd: root, encoding: 'utf8' }).trim().split('\n')) {
+      delete env[name];
+    }
+    const git = (args: string[], input?: string) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8', input });
+    try {
+      git(['init', '--quiet']);
+      for (const path of new Set(patterns.flatMap((pattern) => pattern.trim().split('\n').map((line) => line.slice(1))))) {
+        const target = resolve(dir, path);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, readFileSync(resolve(root, path)));
+      }
+      writeFileSync(resolve(dir, 'unrelated.txt'), 'base-only content\n');
+      git(['add', '.']);
+      git(['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=Audit fixture',
+        '-c', 'user.email=audit@example.invalid', 'commit', '--quiet', '-m', 'audit inputs']);
+      for (const [index, name] of auditJobs.entries()) {
+        git(['sparse-checkout', 'set', '--no-cone', '--stdin'], patterns[index]);
+        assert.equal(existsSync(resolve(dir, 'unrelated.txt')), false);
+        assert.equal(git(['show', 'HEAD:unrelated.txt']), 'base-only content\n');
+        for (const path of patterns[index].trim().split('\n')) {
+          assert.deepEqual(readFileSync(resolve(dir, path.slice(1))), readFileSync(resolve(root, path.slice(1))));
+        }
+        const module = name === 'audit-rust' ? 'audit-rust-dependencies.mjs' : 'audit-production-dependencies.mjs';
+        execFileSync(process.execPath, ['--input-type=module', '-e', `await import('./.github/scripts/${module}')`], { cwd: dir, env });
+        if (name === 'audit-lockfile') {
+          const baseLock = git(['show', 'HEAD:package-lock.json']);
+          writeFileSync(resolve(dir, 'package-lock.json'), `${baseLock}\n`);
+          assert.equal(spawnSync('git', ['diff', '--quiet', 'HEAD', '--', 'package-lock.json'], { cwd: dir, env }).status, 1);
+          assert.equal(git(['show', 'HEAD:package-lock.json']), baseLock);
+          writeFileSync(resolve(dir, 'package-lock.json'), baseLock);
+        }
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('keeps the aggregate verdict list in step with the audit steps', () => {
     const names = securityAuditSteps().map((step: { env: { AUDIT_STATUS_FILE: string } }) =>
       step.env.AUDIT_STATUS_FILE.match(/audit-status\/([^/]+)\.txt$/)?.[1],
