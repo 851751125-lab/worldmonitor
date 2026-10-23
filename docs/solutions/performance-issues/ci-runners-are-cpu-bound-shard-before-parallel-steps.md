@@ -61,8 +61,8 @@ PR #8966:
   The unit shards ran the Redis apt install beside `install-root-deps` too,
   until #9583. They now install Redis from a package cache with `dpkg`, before
   `install-root-deps`: both composite actions use `actions/cache`, and two
-  parallel steps that each pull an action the job does not reference at the
-  top level download it at once, so one copy fails (run 39936254975).
+  parallel steps that each pull an action not referenced by the job's
+  top-level steps download it at once, so one copy fails (run 39936254975).
 
 Three alternating runs of the old and new workflow on one commit took the wall
 from 273-280s to 216-223s, for about 14% more runner-seconds. The PR's own run

@@ -35,10 +35,13 @@ runs:
         # fetches the two named packages too: the cache always holds both. The
         # image's package lists go stale when Ubuntu supersedes a redis build
         # (2026-10-08), so refresh them only when the fast path fails.
+        # Joined with &&: called before ||, the function runs without errexit,
+        # so a failed first command would otherwise be masked by the second
+        # and the index refresh skipped.
         download() {
           sudo apt-get install -y --no-install-recommends --download-only \
-            -o Dir::Cache::archives="$HOME/.cache/wm-redis-debs" redis-server redis-tools
-          (cd ~/.cache/wm-redis-debs && sudo apt-get download redis-server redis-tools)
+            -o Dir::Cache::archives="$HOME/.cache/wm-redis-debs" redis-server redis-tools \
+            && (cd ~/.cache/wm-redis-debs && sudo apt-get download redis-server redis-tools)
         }
         download || { sudo apt-get update -qq && download; }
         sudo rm -rf ~/.cache/wm-redis-debs/partial ~/.cache/wm-redis-debs/lock
