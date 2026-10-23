@@ -82,8 +82,11 @@ The browser jobs now:
 - Install only the fonts the shipped locales need beyond the image's DejaVu,
   Liberation and Noto Color Emoji: `fonts-wqy-zenhei` (zh, ja and ko),
   `fonts-tlwg-loma-otf` (th) and `fonts-lohit-deva` (hi). The
-  `install-browser-fonts` action caches the `.deb` files, so most runs download
-  nothing. The step takes 9-11s and runs beside the dependency restore. A
+  `install-browser-fonts` action caches the `.deb` files and installs them with
+  `dpkg -i`. Until #9554 it passed them to `apt-get install`, which downloaded
+  them again from the mirror on every run (see
+  [apt-get-install-local-deb-redownloads-from-mirror.md](apt-get-install-local-deb-redownloads-from-mirror.md)).
+  The step takes 3-14s and runs beside the dependency restore. A
   failed font install only warns, because fonts affect only the evidence
   screenshots.
 

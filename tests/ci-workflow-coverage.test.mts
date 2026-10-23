@@ -1099,6 +1099,16 @@ describe('CI workflow coverage', () => {
     }
     assert.equal(download.if, "steps.font-debs.outputs.cache-hit != 'true'");
     assert.equal(steps.find((step: { uses?: string }) => step.uses?.startsWith('actions/cache/save@')).if, download.if);
+    // `apt-get install <cached .deb paths>` downloads every package again when
+    // the mirror carries the same version, so a cache hit still waited on the
+    // mirror (3m04s at 41.5 kB/s in run 39839159870). dpkg reads the files.
+    const install = steps.find((step: { name?: string }) => step.name === 'Install browser font packages');
+    assert.match(install.run, /debs=\(~\/\.cache\/wm-browser-fonts\/\*\.deb\)/);
+    assert.match(install.run, /sudo dpkg -i "\$\{debs\[@\]\}"/);
+    assert.doesNotMatch(install.run, /apt-get install[^\n]*\.deb/, 'apt-get must not install the cached .deb paths');
+    // apt-get -f can repair a missing dependency by removing the font packages
+    // and still exit 0, so the fallback must prove they are installed.
+    assert.match(install.run, /dpkg-query -W[^\n]*\$\{Status\}/, 'the fallback must check every font package is installed');
     for (const jobName of ['variant-smoke-shards', 'variant-smoke-pro-webmcp']) {
       const fonts = YAML.parse(testWorkflow).jobs[jobName].steps
         .flatMap((step: { parallel?: unknown[] }) => step.parallel ?? [step])
