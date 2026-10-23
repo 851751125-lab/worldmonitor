@@ -1923,7 +1923,6 @@
   "tests/sentry-build-metadata.test.mts": 53,
   "tests/sentry-convex-probe-filters.test.mjs": 216,
   "tests/sentry-defer-replay.test.mts": 54,
-  "tests/sentry-privacy.test.mts": 2891,
   "tests/sentry-release-build.test.mts": 2897,
   "tests/sentry-resolve-pins.test.mjs": 318,
   "tests/sentry-triage-skill.test.mjs": 42,
