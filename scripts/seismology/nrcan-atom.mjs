@@ -432,7 +432,8 @@ export async function fetchMergedEarthquakes({ fetchUsgs, fetchNrcan, previousSo
     const priorCount = previous?.consecutiveFailures;
     const knownStreak = Number.isInteger(priorCount) && priorCount >= 0 && priorCount <= 100;
     const firstFailureAt = knownStreak && priorCount > 0
-      && Number.isSafeInteger(previous.firstFailureAt) && previous.firstFailureAt >= previous.fetchedAt
+      && Number.isSafeInteger(previous.firstFailureAt) && previous.firstFailureAt > 0
+      && (previous.fetchedAt === undefined || previous.firstFailureAt >= previous.fetchedAt)
       && previous.firstFailureAt <= nowMs ? previous.firstFailureAt : nowMs;
     // Unknown predecessors, unusable coverage, and permanent failures earn no grace.
     const nextCount = knownStreak ? Math.min(priorCount + 1, 100) : 2;
