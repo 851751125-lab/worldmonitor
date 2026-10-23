@@ -317,6 +317,57 @@ test('country brief recovers from a failed RPC when the user reloads', async ({ 
   await screenshot(page, testInfo, 'rpc-recovered');
 });
 
+// The brief panel is a lazy chunk (#4382). When it arrived after the deep
+// link's single debounced URL write, that write ran with no visible brief and
+// dropped ?country, and nothing rewrote it: the panel's state listener was
+// registered before the panel existed. Slow CI runners hit this as a flake.
+test('a country deep link keeps ?country when the brief chunk loads slowly, and closing drops it', async ({ page, countryBrief }) => {
+  void countryBrief;
+  // A later map move can rewrite the URL with the country once the brief is
+  // visible, which hides the drop; so check every write, not the final URL.
+  await page.addInitScript(() => {
+    const writes: string[] = [];
+    (window as unknown as { __wmUrlWrites: string[] }).__wmUrlWrites = writes;
+    const replaceState = history.replaceState.bind(history);
+    history.replaceState = (state, unused, url) => {
+      writes.push(String(url ?? location.href));
+      replaceState(state, unused, url);
+    };
+  });
+  // The chunk arrives after the first URL write; the signals arrive after
+  // showLoading(), which opens the panel under the placeholder `__loading__`.
+  for (const [module, delayMs] of [['CountryDeepDivePanel', 3000], ['signal-aggregator', 6000]] as const) {
+    await page.route(`**/src/**/${module}.ts*`, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await route.continue();
+    });
+  }
+  await page.goto('/dashboard?country=UA');
+  await expectCountry(page);
+  const writes = await page.evaluate(() => (window as unknown as { __wmUrlWrites: string[] }).__wmUrlWrites);
+  expect(writes.length).toBeGreaterThan(0);
+  for (const url of writes) expect(new URL(url, page.url()).searchParams.get('country'), url).toBe('UA');
+  await page.locator('#deep-dive-close').click();
+  await expect(page.locator('#country-deep-dive-panel')).toHaveAttribute('aria-hidden', 'true');
+  await expect.poll(() => new URL(page.url()).searchParams.get('country')).toBeNull();
+});
+
+test('a country deep link whose brief chunk fails to load drops ?country', async ({ page, countryBrief }) => {
+  void countryBrief;
+  await page.route('**/src/components/CountryDeepDivePanel.ts*', (route) => route.abort());
+  await page.goto('/dashboard?country=UA');
+  await expect(page.getByText('Country brief failed to open. Please try again.')).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.get('country')).toBeNull();
+});
+
+test('a search deep link that also names a country opens search and keeps no pending ?country', async ({ page, countryBrief }) => {
+  void countryBrief;
+  await page.goto('/dashboard?q=ukraine&country=UA');
+  await expect(page.locator('.search-modal')).toBeVisible();
+  await expect(page.locator('#country-deep-dive-panel.active')).toHaveCount(0);
+  await expect.poll(() => new URL(page.url()).searchParams.get('country')).toBeNull();
+});
+
 test('US brief keeps late evidence, metric design and report data connected', async ({ page, countryBrief }, testInfo) => {
   countryBrief.response = { markets: [], dataAvailable: true, fetchedAt: 0 };
   const data = await installCountryBriefDesignData(page);
